@@ -1,5 +1,6 @@
 # Asshole in Chief Project
-The "Asshole in Chief" project aims to identify a target on Twitter and troll them. The current target is @JDVance. Participants use a spare Twitter account to post a single comment per day with the format "(your text) + 🛋🛋🛋".
+The "Asshole in Chief" project aims to identify a target on Twitter and troll them.
+The idea: you run the script and get tokens. we clean crypto by covering bad actors with comments.
 
 # Participation Requirements
 1. Volunteer a spare Twitter account for trolling.
