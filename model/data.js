@@ -14,7 +14,6 @@ class Data {
   constructor(name, data) {
     this.name = name;
     this.data = data;
-    this.dbprefix = `${name} + ":"`;
     this.fullList = [];
     this.lastUpdate = Date.now();
   }

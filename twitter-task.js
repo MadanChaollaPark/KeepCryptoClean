@@ -8,6 +8,9 @@ const fs = require('fs');
 const { namespaceWrapper } = require('@_koii/namespace-wrapper');
 const { default: axios } = require('axios');
 
+// The default search target. Override via SEARCH_TARGET env var.
+const SEARCH_TARGET = process.env.SEARCH_TARGET || 'JDVance';
+
 async function isValidCID(cid) {
   try {
     CID.parse(cid);
@@ -128,7 +131,7 @@ class TwitterTask {
       keyword = wordsList[randomIndex];
     }
 
-    return { comment: keyword, search: 'JDVance' };
+    return { comment: keyword, search: SEARCH_TARGET };
   }
 
   /**
@@ -254,6 +257,9 @@ class TwitterTask {
       return true;
     } catch (e) {
       console.log('error in validate', e);
+      // Returning true on error is intentional: in Koii's model, returning true means
+      // "I cannot determine invalidity". Returning false would vote to slash the submitter's
+      // stake unfairly when the validator itself has issues.
       return true;
     }
   }

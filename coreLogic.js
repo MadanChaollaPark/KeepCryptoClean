@@ -114,11 +114,7 @@ class CoreLogic {
               // slash 70% of the stake as still the audit is triggered but no votes are casted
               // Note that the votes are on the basis of the submission value
               // to do so we need to fetch the stakes of the candidate from the task state
-              const stake_list = taskStakeListJSON.stake_list;
-              const candidateStake = stake_list[candidatePublicKey];
-              const slashedStake = candidateStake * 0;
               distributionList[candidatePublicKey] = 0;
-              // console.log('Candidate Stake', candidateStake);
             } else {
               let numOfVotes = 0;
               for (let index = 0; index < votes.length; index++) {
@@ -130,11 +126,7 @@ class CoreLogic {
                 // slash 70% of the stake as the number of false votes are more than the number of true votes
                 // Note that the votes are on the basis of the submission value
                 // to do so we need to fetch the stakes of the candidate from the task state
-                const stake_list = taskStakeListJSON.stake_list;
-                const candidateStake = stake_list[candidatePublicKey];
-                const slashedStake = candidateStake * 0;
                 distributionList[candidatePublicKey] = 0;
-                // console.log('Candidate Stake', candidateStake);
               }
 
               if (numOfVotes > 0) {
@@ -150,12 +142,9 @@ class CoreLogic {
       // now distribute the rewards based on the valid submissions
       // Here it is assumed that all the nodes doing valid submission gets the same reward
 
+      // Rewards are intentionally set to 0 — the task description specifies "no rewards right now".
+      // When rewards are enabled, uncomment the bounty calculation below.
       const reward = 0;
-      // const reward = Math.floor(
-      //   taskStakeListJSON.bounty_amount_per_round /
-      //     distributionCandidates.length,
-      // );
-      // console.log('REWARD RECEIVED BY EACH NODE', reward);
       for (let i = 0; i < distributionCandidates.length; i++) {
         distributionList[distributionCandidates[i]] = reward;
       }
@@ -335,7 +324,7 @@ class CoreLogic {
       const currentSlot = await namespaceWrapper.getSlot();
       console.log('current slot while calling submit', currentSlot);
       // wait for end of the submission window
-      new Promise(resolve =>
+      await new Promise(resolve =>
         setTimeout(
           resolve,
           (roundBeginSlot + taskState.submission_window - currentSlot) * 408,
