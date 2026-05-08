@@ -15,6 +15,7 @@ A decentralized Twitter engagement task running on the [Koii Network](https://ww
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 - [Key Concepts](#key-concepts)
+- [Further Documentation](#further-documentation)
 - [License](#license)
 
 ## Overview
@@ -282,6 +283,17 @@ The system enforces a ~22-26 hour cooldown between comments per account using a 
 3. Set up your environment variables with the account credentials
 
 > **Note**: There are no rewards for this task currently, but events and bounties are planned for the future.
+
+## Further Documentation
+
+| Document                               | What it covers                                                  |
+| -------------------------------------- | --------------------------------------------------------------- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Round-by-round lifecycle, data layout, on-chain config.    |
+| [CONTRIBUTING.md](CONTRIBUTING.md)     | Setup, scripts, code style, PR conventions.                     |
+| [SECURITY.md](SECURITY.md)             | Threat model, credential & cookie handling, vulnerability reporting. |
+| [CHANGELOG.md](CHANGELOG.md)           | Notable changes per release.                                    |
+| [tests/README.md](tests/README.md)     | Map of smoke scripts and unit tests.                            |
+| [adapters/twitter/README.md](adapters/twitter/README.md) | Twitter adapter module split + standalone use. |
 
 ## License
 
