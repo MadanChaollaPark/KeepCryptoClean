@@ -1,3 +1,17 @@
+/**
+ * TwitterTask — per-round wrapper around the Twitter adapter.
+ *
+ * One instance is created at the start of each round in `coreLogic.task()`.
+ * It owns:
+ *   - the Twitter adapter (browser + login)
+ *   - the local NeDB database used to stage submission data
+ *   - the search term and comment for this round (fetched from the
+ *     middleware service, with a fallback to `couch_comments.json`)
+ *
+ * After construction it kicks off the crawl asynchronously via `start()`.
+ * Other phases later call `getRoundCID()` and `validate()` on the same
+ * instance.
+ */
 const Twitter = require('./adapters/twitter/twitter.js');
 const Data = require('./model/data');
 const { KoiiStorageClient } = require('@_koii/storage-task-sdk');
@@ -11,6 +25,7 @@ const { withRetry } = require('./lib/retry');
 
 dotenv.config();
 
+/** True if `cid` parses as a valid IPFS Content Identifier. */
 async function isValidCID(cid) {
   try {
     CID.parse(cid);
@@ -52,6 +67,10 @@ class TwitterTask {
     this.start();
   }
 
+  /**
+   * Fetch this round's search term + comment, persist them to the local
+   * database, and stash them on the instance.
+   */
   async initialize() {
     try {
       logger.info('Initializing Twitter task');
@@ -69,6 +88,15 @@ class TwitterTask {
     }
   }
 
+  /**
+   * Ask the local middleware (`http://localhost:3000/keywords`) for a comment
+   * keyed off this node's submitter public key. Falls back to a random entry
+   * from `couch_comments.json` when the middleware is unreachable.
+   *
+   * The search term is currently hard-coded to the target X handle.
+   *
+   * @returns {Promise<{ comment: string, search: string }>}
+   */
   async fetchSearchTerms() {
     let keyword;
     try {
@@ -94,6 +122,7 @@ class TwitterTask {
     return { comment: keyword, search: 'JDVance' };
   }
 
+  /** Negotiate a Twitter session and kick off the profile crawl. */
   async start() {
     await this.setAdapter();
     this.isRunning = true;
@@ -112,11 +141,16 @@ class TwitterTask {
     this.adapter.search(query);
   }
 
+  /** Tear the adapter down and mark the task as not running. */
   async stop() {
     this.isRunning = false;
     await this.adapter.stop();
   }
 
+  /**
+   * Bundle this round's collected data, upload it to IPFS, and return the
+   * resulting CID. Delegates to `Twitter.getSubmissionCID`.
+   */
   async getRoundCID(roundID) {
     logger.info({ round: roundID }, 'Preparing round submission');
     const result = await this.adapter.getSubmissionCID(roundID);
@@ -124,10 +158,29 @@ class TwitterTask {
     return result;
   }
 
+  /** Fetch and parse the dataList.json blob behind a submission CID. */
   async getJSONofCID(cid) {
     return getJSONFromCID(cid, 'dataList.json');
   }
 
+  /**
+   * Validate another node's submission.
+   *
+   * Steps:
+   *   1. Fetch their dataList.json from IPFS.
+   *   2. Reject empty payloads.
+   *   3. Count duplicate tweet IDs (logged when over threshold).
+   *   4. Spot-check a small random sample (5% of items, capped at 5)
+   *      against the live X page. The submission passes only when every
+   *      sampled item verifies.
+   *
+   * Returns `false` on any error so we don't accidentally vote for invalid
+   * data.
+   *
+   * @param {string} proofCid - the candidate's submission CID
+   * @param {number} round
+   * @returns {Promise<boolean>}
+   */
   async validate(proofCid, round) {
     try {
       const data = await getJSONFromCID(proofCid, 'dataList.json');
@@ -195,6 +248,14 @@ class TwitterTask {
 
 module.exports = TwitterTask;
 
+/**
+ * Download `fileName` from the IPFS object identified by `cid` and parse it
+ * as JSON. Retries up to `retries` times with exponential backoff.
+ *
+ * @param {string} cid       IPFS Content Identifier
+ * @param {string} fileName  file inside the IPFS object (e.g. "dataList.json")
+ * @param {number} [retries] retry budget passed to lib/retry
+ */
 const getJSONFromCID = async (cid, fileName, retries = 3) => {
   const validateCID = await isValidCID(cid);
   if (!validateCID) {
