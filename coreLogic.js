@@ -1,3 +1,18 @@
+/**
+ * CoreLogic — orchestrates one round of the task.
+ *
+ * Each round walks through four phases driven by the Koii task runner via
+ * IPC events (see `index.js`):
+ *
+ *   1. task()          — execute: spin up the Twitter crawler
+ *   2. submitTask()    — submit:  upload collected data to IPFS, post the CID
+ *   3. auditTask()     — audit:   verify other nodes' submissions
+ *   4. selectAndGenerateDistributionList() / auditDistribution()
+ *                      — distribute: compute and validate reward payouts
+ *
+ * `this.twitterTask` is created at the start of the round and reused by the
+ * submit and audit phases.
+ */
 const { namespaceWrapper } = require('@_koii/namespace-wrapper');
 const TwitterTask = require('./twitter-task');
 const logger = require('./lib/logger');
@@ -7,6 +22,13 @@ class CoreLogic {
     this.twitterTask = null;
   }
 
+  /**
+   * Phase 1 (execute): instantiate the TwitterTask, which logs in and starts
+   * crawling. Errors are logged but not rethrown — the round continues so
+   * the audit phase can still vote on whatever data was collected.
+   *
+   * @param {number} roundNumber
+   */
   async task(roundNumber) {
     logger.info({ round: roundNumber }, 'Main task called');
     try {
@@ -17,6 +39,10 @@ class CoreLogic {
     }
   }
 
+  /**
+   * Pull the IPFS CID for the current round from the running TwitterTask.
+   * Returns `undefined` if no submission was produced.
+   */
   async fetchSubmission(roundNumber) {
     logger.info({ round: roundNumber }, 'Fetching submission');
     try {
@@ -33,6 +59,20 @@ class CoreLogic {
     }
   }
 
+  /**
+   * Build the reward distribution map for `round`.
+   *
+   * Rules:
+   *   - Submissions with no audit triggered are valid candidates.
+   *   - Submissions that were audited but received no votes are slashed (0).
+   *   - Submissions with a positive vote score are valid candidates;
+   *     negative scores are slashed.
+   *   - The round's bounty is split equally (floor-divided) across all
+   *     valid candidates.
+   *
+   * @param {number} round
+   * @returns {Promise<Object<string, number>>} candidatePublicKey -> reward
+   */
   async generateDistributionList(round, _dummyTaskState) {
     try {
       logger.info({ round }, 'Generating distribution list');
@@ -134,6 +174,10 @@ class CoreLogic {
     }
   }
 
+  /**
+   * Generate the distribution list and, if the namespace wrapper elects this
+   * node as the decider, upload it on chain.
+   */
   submitDistributionList = async round => {
     logger.info({ round }, 'Submitting distribution list');
 
@@ -159,6 +203,11 @@ class CoreLogic {
     }
   };
 
+  /**
+   * Phase 4 (distribute) — entry point invoked by the IPC handler. Delegates
+   * to the namespace wrapper which decides whether this node should be the
+   * one to submit the distribution list for the round.
+   */
   async selectAndGenerateDistributionList(
     round,
     isPreviousRoundFailed = false,
@@ -170,6 +219,11 @@ class CoreLogic {
     );
   }
 
+  /**
+   * Audit callback — called by the namespace wrapper for each submission this
+   * node is asked to vote on. Defaults to "valid" when the TwitterTask has
+   * not been initialised so we never accidentally slash an honest peer.
+   */
   validateNode = async (submission_value, round) => {
     if (!this.twitterTask) {
       return true;
@@ -177,6 +231,7 @@ class CoreLogic {
     return await this.twitterTask.validate(submission_value, round);
   };
 
+  /** Strict shallow equality — used to compare distribution maps. */
   async shallowEqual(object1, object2) {
     const keys1 = Object.keys(object1);
     const keys2 = Object.keys(object2);
@@ -187,6 +242,14 @@ class CoreLogic {
     return true;
   }
 
+  /**
+   * Audit callback for distribution lists — fetches the submitted list from
+   * the chain, regenerates the expected list locally, and votes valid iff
+   * the two are shallow-equal.
+   *
+   * Returns `true` (i.e. valid) on errors or when no list can be regenerated
+   * locally — better to abstain than to slash an honest decider.
+   */
   validateDistribution = async (
     distributionListSubmitter,
     round,
@@ -222,6 +285,11 @@ class CoreLogic {
     }
   };
 
+  /**
+   * Phase 2 (submit): waits for the end of the round's submission window,
+   * then posts the IPFS CID on chain. Slot timing comes from `taskState`;
+   * the 408 ms multiplier is the Koii network's nominal slot duration.
+   */
   async submitTask(roundNumber) {
     logger.info({ round: roundNumber }, 'Submitting task');
     try {
@@ -253,6 +321,10 @@ class CoreLogic {
     }
   }
 
+  /**
+   * Phase 3 (audit): asks the namespace wrapper to walk other nodes'
+   * submissions and vote using {@link validateNode}.
+   */
   async auditTask(roundNumber) {
     logger.info({ round: roundNumber }, 'Auditing task');
     const slot = await namespaceWrapper.getSlot();
@@ -264,6 +336,9 @@ class CoreLogic {
     );
   }
 
+  /**
+   * Audit the distribution list for the round using {@link validateDistribution}.
+   */
   async auditDistribution(roundNumber) {
     logger.info({ round: roundNumber }, 'Auditing distribution');
     await namespaceWrapper.validateAndVoteOnDistributionList(
