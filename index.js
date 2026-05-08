@@ -1,3 +1,22 @@
+/**
+ * Entry point for the Koii task node.
+ *
+ * Two responsibilities:
+ *
+ *   1. IPC handler — listens on `process.message` for round-lifecycle events
+ *      dispatched by the Koii task runner and forwards each one to the
+ *      matching method on `coreLogic`:
+ *
+ *        executeTask                       -> coreLogic.task
+ *        submitPayload                     -> coreLogic.submitTask
+ *        auditPayload                      -> coreLogic.auditTask
+ *        generateAndSubmitDistributionList -> coreLogic.selectAndGenerateDistributionList
+ *        distributionListAudit             -> coreLogic.auditDistribution
+ *
+ *   2. HTTP probe — exposes `GET /taskState` on the Express app provided by
+ *      the namespace wrapper, returning the current task state as JSON.
+ *      Useful for live debugging and dashboards.
+ */
 const { coreLogic } = require('./coreLogic');
 const {
   namespaceWrapper,
