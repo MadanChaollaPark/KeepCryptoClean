@@ -1,3 +1,20 @@
+/**
+ * Live-debugging helpers for inspecting an existing Koii task on testnet.
+ *
+ * Loads task config from the local KOII Desktop Node directory (or env
+ * overrides), reaches out to the Koii testnet RPC to fetch the on-chain
+ * task account, and decodes the borsh-encoded task state into a plain
+ * object via `wasm/bincode_js.cjs`.
+ *
+ * Used by `prod-debug.js` to run the webpacked task against a live task
+ * registration without going through the full deploy.
+ *
+ * Env overrides (all optional):
+ *   TASK_ID              on-chain Task account public key
+ *   WEBPACKED_FILE_PATH  output of `yarn webpack:prod` (default: dist/main.js)
+ *   TEST_KEYWORDS        keywords to seed into the local middleware
+ *   NODE_DIR             override the auto-detected Desktop Node directory
+ */
 require('dotenv').config;
 const os = require('os');
 const path = require('path');
