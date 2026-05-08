@@ -2,10 +2,20 @@ const { namespaceWrapper } = require('@_koii/namespace-wrapper');
 const logger = require('../lib/logger');
 
 /**
- * Data class - NeDB database wrapper for tweet/comment storage.
+ * Data — thin wrapper around the namespace-wrapper-provided NeDB instance.
  *
- * @param {string} name - the name of the database
- * @param {object} data - the initial data
+ * The Twitter adapter spins up four independent `Data` instances, each with
+ * its own `name` prefix:
+ *
+ *   - `db`        general-purpose tweet/lookup data + login cookies
+ *   - `proofs`    record of CIDs we've submitted, keyed by `proof:<round>`
+ *   - `cids`      raw collected tweet objects keyed by tweet ID, used to
+ *                 build the dataList.json blob uploaded to IPFS
+ *   - `comment`   timestamps used for the rate-limit cooldown (last comment
+ *                 made, etc.)
+ *
+ * @param {string} name - logical database name; used as the dbprefix
+ * @param {object} data - initial in-memory state (rarely used)
  */
 class Data {
   constructor(name, data) {
@@ -16,6 +26,10 @@ class Data {
     this.lastUpdate = Date.now();
   }
 
+  /**
+   * Lazily attach the underlying NeDB handle and ensure indices on the
+   * fields we query most. Idempotent — safe to call multiple times.
+   */
   async initializeData() {
     if (this.db) return;
     const db = await namespaceWrapper.getDb();
@@ -34,6 +48,10 @@ class Data {
     });
   }
 
+  /**
+   * Insert `item`. If a record with the same `id` already exists, the newer
+   * one (by `timestamp`) wins; older inserts are skipped.
+   */
   async create(item) {
     try {
       const existingItem = await this.getItem(item);
@@ -58,6 +76,7 @@ class Data {
     }
   }
 
+  /** Patch the singleton `cookies` record with the encrypted blob. */
   async updateCookie(item) {
     try {
       await this.db.update({ id: 'cookies' }, { $set: item }, {});
@@ -68,6 +87,7 @@ class Data {
     }
   }
 
+  /** Look up records by `id`. Returns the array of matches or `null`. */
   async getItem(item) {
     try {
       const resp = await this.db.find({ id: item.id });
@@ -78,11 +98,16 @@ class Data {
     }
   }
 
+  /** Return every record for the given round. */
   async getList(options) {
     logger.debug({ round: options.round }, 'Fetching list by round');
     return this.db.find({ round: options.round });
   }
 
+  /**
+   * Persist `{ searchTerms, comment }` for `round` so it can be recovered
+   * after a process restart mid-round.
+   */
   async createSearchTerm(searchTerms, round, randomComment) {
     try {
       await this.db.insert({
@@ -97,6 +122,7 @@ class Data {
     }
   }
 
+  /** Recover the search term stored for `round`, or null if not present. */
   async getSearchTerm(round) {
     try {
       const resp = await this.db.find({ termRound: parseInt(round) });
@@ -110,6 +136,10 @@ class Data {
     }
   }
 
+  /**
+   * Upsert a timestamp record (`id = comment`). The cooldown logic in
+   * `crawler.js` relies on this for the per-account rate-limit (~24h).
+   */
   async createTimestamp(comment, timestamp) {
     try {
       const existingItem = await this.db.find({ id: comment });
@@ -127,6 +157,7 @@ class Data {
     }
   }
 
+  /** Read back the timestamp stored for the given key, or null. */
   async getTimestamp(comment) {
     try {
       const resp = await this.db.find({ id: comment });
