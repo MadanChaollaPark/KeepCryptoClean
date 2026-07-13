@@ -473,7 +473,7 @@ function renderInventory(
     'The source includes package.json, yarn.lock, webpack.config.js, scripts/build.js, and scripts/patch-task-manager.js.',
     'Pinned toolchain: Node.js 22.22.0 and Yarn 1.22.22.',
     'Rebuild/relink: yarn install --frozen-lockfile',
-    'Rebuild/relink: KCC_TARGET_USER_ID=<embedded numeric X User ID> yarn build',
+    'Rebuild/relink: yarn build --public-target-user-id <embedded numeric X User ID> --release-commit <source commit>',
     'Local dependency modifications are reproducibly applied by scripts/patch-task-manager.js.',
     '',
     `Bundled application package count: ${sorted.length}`,

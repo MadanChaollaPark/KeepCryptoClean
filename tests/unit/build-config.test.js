@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   isolatedWebpackEnvironment,
+  parseBuildMetadata,
   validatedBuildMetadata,
   webpackArguments,
 } = require('../../scripts/build');
@@ -13,8 +14,8 @@ test('build metadata accepts only explicit public identifiers', () => {
   assert.deepEqual(
     validatedBuildMetadata(
       {
-        KCC_RELEASE_COMMIT: 'a'.repeat(40),
-        KCC_TARGET_USER_ID: '1234567890',
+        publicTargetUserId: '1234567890',
+        releaseCommit: 'a'.repeat(40),
       },
       'production',
     ),
@@ -29,26 +30,38 @@ test('build metadata accepts only explicit public identifiers', () => {
   });
   assert.throws(
     () => validatedBuildMetadata({}, 'production'),
-    /KCC_TARGET_USER_ID/,
+    /public-target-user-id/,
   );
   assert.throws(
     () =>
       validatedBuildMetadata(
-        { KCC_TARGET_USER_ID: 'screen-name' },
+        { publicTargetUserId: 'screen-name' },
         'development',
       ),
-    /KCC_TARGET_USER_ID/,
+    /public-target-user-id/,
   );
   assert.throws(
     () =>
       validatedBuildMetadata(
         {
-          KCC_RELEASE_COMMIT: 'not-a-commit',
-          KCC_TARGET_USER_ID: '1',
+          publicTargetUserId: '1',
+          releaseCommit: 'not-a-commit',
         },
         'production',
       ),
-    /KCC_RELEASE_COMMIT/,
+    /release-commit/,
+  );
+
+  assert.deepEqual(
+    parseBuildMetadata(
+      ['--public-target-user-id', '42', '--release-commit', 'c'.repeat(40)],
+      'production',
+    ),
+    { publicTargetUserId: '42', releaseCommit: 'c'.repeat(40) },
+  );
+  assert.throws(
+    () => parseBuildMetadata(['--unknown', 'value'], 'production'),
+    /Unknown option/,
   );
 });
 

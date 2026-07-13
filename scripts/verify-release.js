@@ -96,7 +96,14 @@ if (git(['status', '--porcelain', '--untracked-files=all'])) {
   fail('The frozen release install changed tracked source.');
 }
 
-run('yarn', ['build'], releaseEnv);
+const buildArgs = [
+  'build',
+  '--public-target-user-id',
+  process.env.KCC_TARGET_USER_ID,
+  '--release-commit',
+  head,
+];
+run('yarn', buildArgs, releaseEnv);
 const first = {
   artifact: digest('dist/main.js', MAX_ARTIFACT_BYTES),
   notices: digest(
@@ -104,7 +111,7 @@ const first = {
     MAX_BUNDLE_NOTICE_BYTES,
   ),
 };
-run('yarn', ['build'], releaseEnv);
+run('yarn', buildArgs, releaseEnv);
 const second = {
   artifact: digest('dist/main.js', MAX_ARTIFACT_BYTES),
   notices: digest(

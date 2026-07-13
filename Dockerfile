@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
 COPY . .
 RUN KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn lint \
     && yarn test:unit \
-    && KCC_RELEASE_COMMIT="$KCC_RELEASE_COMMIT" KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn build \
+    && yarn build --public-target-user-id "$KCC_TARGET_USER_ID" --release-commit "$KCC_RELEASE_COMMIT" \
     && KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn verify:artifact \
     && yarn verify:licenses
 

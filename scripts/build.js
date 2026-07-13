@@ -2,6 +2,7 @@
 
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
+const { parseArgs } = require('node:util');
 const { isCanonicalXId } = require('../lib/identifiers');
 
 const root = path.resolve(__dirname, '..');
@@ -23,29 +24,47 @@ const publicBuildEnvironmentKeys = [
   'WINDIR',
 ];
 
-function validatedBuildMetadata(environment, mode) {
+function validatedBuildMetadata(metadata, mode) {
   if (mode !== 'production' && mode !== 'development') {
     throw new Error('Build mode must be production or development.');
   }
 
-  const publicTargetUserId = environment.KCC_TARGET_USER_ID || '';
+  const publicTargetUserId = metadata.publicTargetUserId || '';
   if (
     (mode === 'production' || publicTargetUserId) &&
     !isCanonicalXId(publicTargetUserId)
   ) {
     throw new Error(
-      'KCC_TARGET_USER_ID must be a numeric X User ID (1-19 digits) for this build.',
+      '--public-target-user-id must be a numeric X User ID (1-19 digits) for this build.',
     );
   }
 
-  const releaseCommit = environment.KCC_RELEASE_COMMIT || '';
+  const releaseCommit = metadata.releaseCommit || '';
   if (releaseCommit && !/^[0-9a-f]{40}$/.test(releaseCommit)) {
     throw new Error(
-      'KCC_RELEASE_COMMIT must be a lowercase 40-character Git commit.',
+      '--release-commit must be a lowercase 40-character Git commit.',
     );
   }
 
   return Object.freeze({ publicTargetUserId, releaseCommit });
+}
+
+function parseBuildMetadata(args, mode) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      'public-target-user-id': { type: 'string' },
+      'release-commit': { type: 'string' },
+    },
+    strict: true,
+  });
+  return validatedBuildMetadata(
+    {
+      publicTargetUserId: values['public-target-user-id'] || '',
+      releaseCommit: values['release-commit'] || '',
+    },
+    mode,
+  );
 }
 
 function isolatedWebpackEnvironment(environment, mode) {
@@ -68,11 +87,10 @@ function webpackArguments(mode, metadata) {
 }
 
 function run() {
-  require('dotenv').config({ path: path.join(root, '.env') });
   const mode = process.argv[2] || 'production';
   let metadata;
   try {
-    metadata = validatedBuildMetadata(process.env, mode);
+    metadata = parseBuildMetadata(process.argv.slice(3), mode);
   } catch (error) {
     console.error(`ERROR: ${error.message}`);
     process.exit(1);
@@ -94,6 +112,7 @@ if (require.main === module) run();
 
 module.exports = {
   isolatedWebpackEnvironment,
+  parseBuildMetadata,
   validatedBuildMetadata,
   webpackArguments,
 };
