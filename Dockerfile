@@ -11,6 +11,7 @@ RUN corepack enable \
     && corepack prepare yarn@1.22.22 --activate
 
 COPY package.json yarn.lock ./
+COPY scripts/patch-task-manager.js ./scripts/patch-task-manager.js
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
