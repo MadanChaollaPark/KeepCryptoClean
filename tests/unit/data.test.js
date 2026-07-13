@@ -4,11 +4,21 @@ const Data = require('../../model/data');
 
 function memoryDb() {
   const docs = [];
-  const matches = (doc, query) => Object.entries(query).every(([key, value]) => doc[key] === value);
+  const matches = (doc, query) =>
+    Object.entries(query).every(([key, value]) => {
+      if (value && typeof value === 'object' && '$lt' in value) {
+        return doc[key] < value.$lt;
+      }
+      return doc[key] === value;
+    });
   return {
     docs,
-    ensureIndex(_options, callback) { callback(null); },
-    find(query) { return docs.filter(doc => matches(doc, query)).map(doc => ({ ...doc })); },
+    ensureIndex(_options, callback) {
+      callback(null);
+    },
+    find(query) {
+      return docs.filter(doc => matches(doc, query)).map(doc => ({ ...doc }));
+    },
     update(query, update, options = {}) {
       const index = docs.findIndex(doc => matches(doc, query));
       const replacement = update.$set
@@ -50,15 +60,17 @@ describe('Data namespace isolation', () => {
     assert.equal((await cookies.getList({ round: 3 })).length, 1);
   });
 
-  it('makes initialization awaitable/idempotent and validates timestamps', async () => {
+  it('makes initialization awaitable/idempotent and prunes only old rounds', async () => {
     const db = memoryDb();
     const data = new Data('cooldowns', [], { db });
     assert.equal(await data.initializeData(), db);
     assert.equal(await data.initializeData(), db);
-    await assert.rejects(() => data.createTimestamp('LAST', NaN), TypeError);
-    await data.createTimestamp('LAST', 100);
-    await data.createTimestamp('LAST', 99);
-    assert.equal(await data.getTimestamp('LAST'), 100);
+    await data.create({ id: 'old', round: 1 });
+    await data.create({ id: 'new', round: 5 });
+    assert.equal(await data.deleteBeforeRound(5), 1);
+    assert.equal(await data.getItem({ id: 'old' }), null);
+    assert.equal((await data.getItem({ id: 'new' }))[0].round, 5);
+    await assert.rejects(() => data.deleteBeforeRound(-1), TypeError);
   });
 
   it('does not begin a database write after cancellation', async () => {

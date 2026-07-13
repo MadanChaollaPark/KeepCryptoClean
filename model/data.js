@@ -13,20 +13,15 @@ function throwIfAborted(signal) {
 /**
  * A namespaced, initialization-safe wrapper around Koii's shared NeDB.
  *
- * Every query includes `_dataNamespace`. Previous versions constructed four
- * logical stores over the same database but queried only by `id`, allowing a
- * cookie, proof, tweet, or cooldown record from one store to shadow another.
+ * Every query includes `_dataNamespace`, so logical stores cannot shadow one
+ * another even though Koii supplies one shared database.
  */
 class Data {
-  constructor(name, data, options = {}) {
+  constructor(name, _initialData, options = {}) {
     if (typeof name !== 'string' || !name.trim()) {
       throw new TypeError('Data requires a non-empty namespace name');
     }
     this.name = name.trim();
-    this.data = data;
-    this.dbprefix = `${this.name}:`;
-    this.fullList = [];
-    this.lastUpdate = Date.now();
     this.db = options.db || null;
     this._initializePromise = null;
   }
@@ -35,15 +30,17 @@ class Data {
     if (this._initializePromise) return this._initializePromise;
     this._initializePromise = (async () => {
       if (!this.db) {
-        const { namespaceWrapper } = require('@_koii/task-manager/namespace-wrapper');
+        const {
+          namespaceWrapper,
+        } = require('@_koii/task-manager/namespace-wrapper');
         this.db = await namespaceWrapper.getDb();
       }
-      if (!this.db) throw new Error(`Database unavailable for namespace ${this.name}`);
+      if (!this.db)
+        throw new Error(`Database unavailable for namespace ${this.name}`);
       await Promise.all([
         this._ensureIndex(NAMESPACE_FIELD),
         this._ensureIndex('id'),
         this._ensureIndex('round'),
-        this._ensureIndex('termRound'),
       ]);
       return this.db;
     })().catch(error => {
@@ -64,7 +61,10 @@ class Data {
         else resolve();
       };
       try {
-        const result = this.db.ensureIndex({ fieldName, sparse: true }, callback);
+        const result = this.db.ensureIndex(
+          { fieldName, sparse: true },
+          callback,
+        );
         if (result && typeof result.then === 'function') {
           result.then(() => callback()).catch(callback);
         }
@@ -93,24 +93,20 @@ class Data {
     throwIfAborted(options.signal);
     if (
       existing?.[0]?.timestamp !== undefined &&
-      (!Number.isFinite(item.timestamp) || item.timestamp <= existing[0].timestamp)
+      (!Number.isFinite(item.timestamp) ||
+        item.timestamp <= existing[0].timestamp)
     ) {
-      logger.debug({ id: item.id, namespace: this.name }, 'Item has older/equal timestamp; skipping');
+      logger.debug(
+        { id: item.id, namespace: this.name },
+        'Item has older/equal timestamp; skipping',
+      );
       return undefined;
     }
     const record = this._record(item);
     throwIfAborted(options.signal);
-    await this.db.update(this._scope({ id: item.id }), record, { upsert: true });
-    return record;
-  }
-
-  async updateCookie(item) {
-    if (!item || item.id !== 'cookies' || typeof item.data !== 'string') {
-      throw new TypeError('updateCookie requires an encrypted cookies record');
-    }
-    await this.initializeData();
-    const record = this._record(item);
-    await this.db.update(this._scope({ id: 'cookies' }), record, { upsert: true });
+    await this.db.update(this._scope({ id: item.id }), record, {
+      upsert: true,
+    });
     return record;
   }
 
@@ -137,51 +133,17 @@ class Data {
     return this.db.remove(this._scope({ round }), { multi: true });
   }
 
-  async createSearchTerm(searchTerms, round, randomComment) {
+  async deleteBeforeRound(round) {
     await this.initializeData();
     const normalizedRound = Number(round);
     if (!Number.isSafeInteger(normalizedRound) || normalizedRound < 0) {
-      throw new TypeError('createSearchTerm requires a non-negative integer round');
+      throw new TypeError(
+        'deleteBeforeRound requires a non-negative integer round',
+      );
     }
-    const record = this._record({
-      termRound: normalizedRound,
-      terms: searchTerms,
-      comment: randomComment,
+    return this.db.remove(this._scope({ round: { $lt: normalizedRound } }), {
+      multi: true,
     });
-    await this.db.update(
-      this._scope({ termRound: normalizedRound }),
-      record,
-      { upsert: true },
-    );
-    return record;
-  }
-
-  async getSearchTerm(round) {
-    await this.initializeData();
-    const normalizedRound = Number(round);
-    if (!Number.isSafeInteger(normalizedRound) || normalizedRound < 0) return null;
-    const response = await this.db.find(this._scope({ termRound: normalizedRound }));
-    return response.length > 0 ? response[0].terms : null;
-  }
-
-  async createTimestamp(key, timestamp) {
-    await this.initializeData();
-    if (typeof key !== 'string' || !key || !Number.isSafeInteger(timestamp) || timestamp <= 0) {
-      throw new TypeError('createTimestamp requires a key and Unix timestamp in seconds');
-    }
-    const existing = await this.db.find(this._scope({ id: key }));
-    if (existing.length > 0 && existing[0].timestamp >= timestamp) return existing[0];
-    const record = this._record({ id: key, timestamp });
-    await this.db.update(this._scope({ id: key }), record, { upsert: true });
-    return record;
-  }
-
-  async getTimestamp(key) {
-    await this.initializeData();
-    if (typeof key !== 'string' || !key) return null;
-    const response = await this.db.find(this._scope({ id: key }));
-    const timestamp = response[0]?.timestamp;
-    return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
   }
 }
 

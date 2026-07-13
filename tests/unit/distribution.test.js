@@ -14,10 +14,16 @@ test('distribution is sorted, deterministic, and allocates the full remainder', 
     { publicKey: 'bravo', votes: 1, stake: 0 },
   ];
   const first = buildDistributionFromSubmitters(submitters, 10);
-  const second = buildDistributionFromSubmitters(submitters.slice().reverse(), 10);
+  const second = buildDistributionFromSubmitters(
+    submitters.slice().reverse(),
+    10,
+  );
   assert.deepEqual(first, { alpha: 4, bravo: 3, charlie: 3 });
   assert.deepEqual(second, first);
-  assert.equal(Object.values(first).reduce((sum, value) => sum + value, 0), 10);
+  assert.equal(
+    Object.values(first).reduce((sum, value) => sum + value, 0),
+    10,
+  );
 });
 
 test('zero, tied, and negative votes are explicitly slashed', () => {
@@ -36,7 +42,10 @@ test('zero, tied, and negative votes are explicitly slashed', () => {
 
 test('malformed candidates and bounties fail closed', () => {
   assert.deepEqual(buildDistributionFromSubmitters([], -1), {});
-  assert.deepEqual(buildDistributionFromSubmitters([{ publicKey: 'a', votes: 1.5 }], 10), {});
+  assert.deepEqual(
+    buildDistributionFromSubmitters([{ publicKey: 'a', votes: 1.5 }], 10),
+    {},
+  );
   assert.deepEqual(
     buildDistributionFromSubmitters(
       [

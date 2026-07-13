@@ -22,7 +22,8 @@ production profile therefore follows these rules:
 
 - official X API reads only by default;
 - no browser profile, password, cookie, or user token in the image or bundle;
-- explicit target User ID, round, node, schema, field, and size validation;
+- build-embedded target User ID plus round, node, schema, field, and size
+  validation;
 - deterministic distribution calculations;
 - bounded network requests and fail-closed error handling;
 - localhost-only diagnostics;
@@ -81,9 +82,16 @@ the historical material remains retrievable.
 ## Dependency and release controls
 
 - `yarn.lock` is committed and CI uses `--frozen-lockfile`.
+- Exact-pinned Koii dependencies are patched during install: task-manager
+  1.0.14 removes fail-open audit/distribution defaults, route rewriting/state
+  disclosure, and unhandled concurrent IPC; namespace-wrapper 1.0.23 bounds
+  and fails closed on Task-Node RPC; storage-task-sdk 1.2.8 streams bounded
+  responses and restricts this task to its maintained HTTPS trust set. The
+  build refuses any unpatched version.
 - Dependabot covers npm, GitHub Actions, and Docker.
 - CI runs offline unit tests, lint, a production bundle check, a high-level
-  production audit, a container build, dependency review, and CodeQL.
+  production and full-toolchain audit, a container build, dependency review,
+  and CodeQL.
 - Release artifacts must be rebuilt from a clean checkout and compared with CI.
 - Do not suppress an advisory without a documented exploitability analysis,
   owner, expiry date, and compensating control.

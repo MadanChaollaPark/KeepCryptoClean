@@ -18,7 +18,8 @@ class CoreLogic {
 
   _namespace() {
     if (!this.namespaceWrapper) {
-      this.namespaceWrapper = require('@_koii/namespace-wrapper').namespaceWrapper;
+      this.namespaceWrapper =
+        require('@_koii/namespace-wrapper').namespaceWrapper;
     }
     return this.namespaceWrapper;
   }
@@ -55,7 +56,10 @@ class CoreLogic {
           logger.error({ err: stopError }, 'Failed to clean up unready task');
         }
       }
-      logger.error({ err: error, round: roundNumber }, 'Round initialization failed');
+      logger.error(
+        { err: error, round: roundNumber },
+        'Round initialization failed',
+      );
       throw error;
     }
   }
@@ -68,7 +72,10 @@ class CoreLogic {
       const cid = await task.getRoundCID(roundNumber);
       return typeof cid === 'string' && cid.length > 0 ? cid : undefined;
     } catch (error) {
-      logger.error({ err: error, round: roundNumber }, 'Submission generation failed');
+      logger.error(
+        { err: error, round: roundNumber },
+        'Submission generation failed',
+      );
       return undefined;
     }
   }
@@ -78,7 +85,10 @@ class CoreLogic {
     if (!task || task.round !== round) return false;
     try {
       if (typeof task.ready === 'function') await task.ready();
-      return (await task.validate(submissionValue, round, submitterPublicKey)) === true;
+      return (
+        (await task.validate(submissionValue, round, submitterPublicKey)) ===
+        true
+      );
     } catch (error) {
       logger.error({ err: error, round }, 'Node validation failed closed');
       return false;
@@ -103,9 +113,15 @@ class CoreLogic {
       const taskState =
         providedTaskState ||
         (await wrapper.getTaskState({ is_stake_list_required: true }));
-      return buildDistributionFromSubmitters(submitters, taskState?.bounty_amount_per_round);
+      return buildDistributionFromSubmitters(
+        submitters,
+        taskState?.bounty_amount_per_round,
+      );
     } catch (error) {
-      logger.error({ err: error, round }, 'Distribution generation failed closed');
+      logger.error(
+        { err: error, round },
+        'Distribution generation failed closed',
+      );
       return {};
     }
   }
@@ -114,31 +130,64 @@ class CoreLogic {
     return equalDistributionLists(left, right);
   }
 
-  validateDistribution = async (distributionListSubmitter, round, _list, taskState) => {
+  validateDistribution = async (
+    distributionListSubmitter,
+    round,
+    _list,
+    taskState,
+  ) => {
     try {
-      if (typeof distributionListSubmitter !== 'string' || !distributionListSubmitter) return false;
-      const raw = await this._namespace().getDistributionList(distributionListSubmitter, round);
-      if (typeof raw !== 'string' || Buffer.byteLength(raw, 'utf8') > 1024 * 1024) return false;
+      if (
+        typeof distributionListSubmitter !== 'string' ||
+        !distributionListSubmitter
+      )
+        return false;
+      const raw = await this._namespace().getDistributionList(
+        distributionListSubmitter,
+        round,
+      );
+      if (
+        typeof raw !== 'string' ||
+        Buffer.byteLength(raw, 'utf8') > 1024 * 1024
+      )
+        return false;
       const fetched = JSON.parse(raw);
       if (!isDistributionList(fetched)) return false;
       const expected = await this.generateDistributionList(round, taskState);
       return equalDistributionLists(fetched, expected);
     } catch (error) {
-      logger.error({ err: error, round }, 'Distribution validation failed closed');
+      logger.error(
+        { err: error, round },
+        'Distribution validation failed closed',
+      );
       return false;
     }
   };
 
   submitDistributionList = async round => {
     const distributionList = await this.generateDistributionList(round);
-    if (!Object.keys(distributionList).length) return false;
+    if (!Object.keys(distributionList).length) {
+      throw new Error('NO DISTRIBUTION LIST GENERATED');
+    }
     const wrapper = this._namespace();
-    const decider = await wrapper.uploadDistributionList(distributionList, round);
-    if (decider) await wrapper.distributionListSubmissionOnChain(round);
+    const decider = await wrapper.uploadDistributionList(
+      distributionList,
+      round,
+    );
+    if (decider !== true) {
+      throw new Error('DISTRIBUTION LIST UPLOAD WAS NOT ACCEPTED');
+    }
+    const response = await wrapper.distributionListSubmissionOnChain(round);
+    if (typeof response !== 'string' || !response.trim()) {
+      throw new Error('DISTRIBUTION LIST ON-CHAIN SUBMISSION FAILED');
+    }
     return true;
   };
 
-  async selectAndGenerateDistributionList(round, isPreviousRoundFailed = false) {
+  async selectAndGenerateDistributionList(
+    round,
+    isPreviousRoundFailed = false,
+  ) {
     return this._namespace().selectAndGenerateDistributionList(
       this.submitDistributionList,
       round,
@@ -149,12 +198,18 @@ class CoreLogic {
   async submitTask(roundNumber) {
     const submission = await this.fetchSubmission(roundNumber);
     if (!submission) return false;
-    await this._namespace().checkSubmissionAndUpdateRound(submission, roundNumber);
+    await this._namespace().checkSubmissionAndUpdateRound(
+      submission,
+      roundNumber,
+    );
     return true;
   }
 
   async auditTask(roundNumber) {
-    return this._namespace().validateAndVoteOnNodes(this.validateNode, roundNumber);
+    return this._namespace().validateAndVoteOnNodes(
+      this.validateNode,
+      roundNumber,
+    );
   }
 
   async auditDistribution(roundNumber) {

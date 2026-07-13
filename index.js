@@ -23,7 +23,9 @@ const callbacks = {
     logger.info('KeepCryptoClean observer initialized');
   },
   task: serialize('task', round => coreLogic.task(round)),
-  submission: serialize('submission', round => coreLogic.fetchSubmission(round)),
+  submission: serialize('submission', round =>
+    coreLogic.fetchSubmission(round),
+  ),
   audit: serialize(
     'audit',
     (submission, round, submitterPublicKey) =>
@@ -43,8 +45,12 @@ const callbacks = {
     });
     app.get('/readyz', (_req, res) => {
       const task = coreLogic.twitterTask;
-      const ready = Boolean(task && !task.initializationError && !task.runError);
-      res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not-ready' });
+      const ready = Boolean(
+        task && !task.initializationError && !task.runError,
+      );
+      res
+        .status(ready ? 200 : 503)
+        .json({ status: ready ? 'ready' : 'not-ready' });
     });
   },
 };

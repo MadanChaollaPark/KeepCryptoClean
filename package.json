@@ -13,10 +13,9 @@
     "build:dev": "webpack --mode development",
     "webpack": "yarn build:dev",
     "webpack:prod": "yarn build",
-    "webpack:test": "webpack --config test.webpack.config.js --mode development",
     "test": "yarn test:unit",
     "test:unit": "node --test tests/unit/*.test.js",
-    "test:ci": "yarn lint && yarn test:unit && yarn build && yarn verify:artifact && yarn check:repository",
+    "test:ci": "yarn preflight && yarn format:check && yarn lint && yarn test:unit && yarn build && yarn verify:artifact && yarn verify:licenses && yarn smoke:artifact && yarn check:repository",
     "lint": "eslint --max-warnings=0 .",
     "lint:fix": "eslint --fix .",
     "format": "prettier --write \"**/*.{js,json,md,yaml,yml}\"",
@@ -24,10 +23,12 @@
     "preflight": "node scripts/preflight.js",
     "preflight:strict": "node scripts/preflight.js --strict",
     "verify:artifact": "node scripts/verify-artifact.js",
+    "verify:licenses": "node scripts/verify-licenses.js",
+    "verify:licenses:release": "node scripts/verify-licenses.js --release",
+    "smoke:artifact": "node scripts/smoke-artifact.js",
     "check:repository": "node scripts/check-repository-hygiene.js",
     "audit:production": "node scripts/audit-production.js",
-    "deploy": "yarn test:ci && create-task-cli",
-    "prod-debug": "node prod-debug.js"
+    "audit:all": "node scripts/audit-production.js --all"
   },
   "repository": {
     "type": "git",
@@ -40,7 +41,7 @@
   "author": "Madan Chaolla Park and contributors",
   "license": "MIT",
   "engines": {
-    "node": ">=18.17.0"
+    "node": ">=22.22.0 <23"
   },
   "packageManager": "yarn@1.22.22",
   "resolutions": {
@@ -58,7 +59,12 @@
     "**/@_koii/web3.js/**/base-x": "3.0.11",
     "**/@_koii/storage-task-sdk/bs58/base-x": "4.0.1",
     "**/socket.io-stream/**/debug": "2.6.9",
-    "**/multimatch/**/minimatch": "3.1.4",
+    "**/cross-spawn": "7.0.6",
+    "**/minimatch": "3.1.5",
+    "**/flatted": "3.4.2",
+    "**/rpc-websockets": "7.11.2",
+    "**/eslint/**/js-yaml": "4.2.0",
+    "**/eslint/**/ajv": "6.14.0",
     "**/minimatch/**/brace-expansion": "1.1.16",
     "**/@nestjs/platform-express/**/multer": "2.2.0",
     "**/lodash": "4.18.1",
@@ -68,8 +74,8 @@
     "**/@nestjs/platform-express/**/qs": "6.15.3"
   },
   "dependencies": {
-    "@_koii/namespace-wrapper": "^1.0.23",
-    "@_koii/storage-task-sdk": "^1.2.8",
+    "@_koii/namespace-wrapper": "1.0.23",
+    "@_koii/storage-task-sdk": "1.2.8",
     "@_koii/task-manager": "1.0.14",
     "@_koii/web3.js": "^0.1.11",
     "axios": "^1.18.1",
@@ -78,11 +84,8 @@
     "pino": "^9.14.0"
   },
   "devDependencies": {
-    "@_koii/create-task-cli": "^1.1.14",
-    "cross-spawn": "^7.0.6",
     "eslint": "^8.57.1",
     "prettier": "^3.9.5",
-    "tail": "^2.2.6",
     "typescript": "^5.9.3",
     "webpack": "^5.108.4",
     "webpack-cli": "^5.1.4"

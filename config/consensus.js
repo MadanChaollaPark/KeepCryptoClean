@@ -1,5 +1,7 @@
 'use strict';
 
+const { isCanonicalXId } = require('../lib/identifiers');
+
 /* global __KCC_BUNDLED__, __KCC_TARGET_USER_ID__ */
 
 // Webpack replaces both constants in the production task executable. Source
@@ -14,7 +16,7 @@ const EVIDENCE_PROVIDER = 'x-api-v2';
 
 function getConsensusTargetUserId(env = process.env) {
   const value = IS_BUNDLED ? EMBEDDED_TARGET_USER_ID : env.KCC_TARGET_USER_ID;
-  return typeof value === 'string' && /^\d{1,20}$/.test(value) ? value : null;
+  return isCanonicalXId(value) ? value : null;
 }
 
 function getConsensusConfig(env = process.env) {

@@ -1,0 +1,32 @@
+POST-RELEASE UPSTREAM LICENSE CLARIFICATION
+
+Package: bs58@4.0.1
+Release gitHead: ba80a23f74efc055577d7040ef32e1ae765d6702
+Registry integrity: sha512-Ok3Wdf5vOIlBrgCvTq96gBkJw+JUEzdBgyaza5HLtPm7yTHkjRy8+JzNyHF7BHa0bNWOQIp3m5YF0nnFcOIKLw==
+The exact release manifest and README declare MIT but omit the full notice.
+Upstream added this full notice at commit ec21ace130d0c08cc317448952b679ec1b93f17d on 2018-06-21:
+https://github.com/cryptocoinjs/bs58/commit/ec21ace130d0c08cc317448952b679ec1b93f17d
+Upstream notice SHA-256: 57efbd615689807b8341d557af0038fae58da7e2831f29f52d02902f657deb25
+
+----- UPSTREAM NOTICE -----
+MIT License
+
+Copyright (c) 2018 cryptocoinjs
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

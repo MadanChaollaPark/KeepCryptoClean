@@ -8,7 +8,11 @@ const logger = require('./lib/logger');
 const { ValidationError } = require('./lib/errors');
 const { withRetry } = require('./lib/retry');
 const { isValidCID } = require('./lib/cid');
-const { EVIDENCE_PROVIDER, getConsensusTargetUserId } = require('./config/consensus');
+const { isCanonicalXId } = require('./lib/identifiers');
+const {
+  EVIDENCE_PROVIDER,
+  getConsensusTargetUserId,
+} = require('./config/consensus');
 const {
   DEFAULT_PROOF_LIMITS,
   ProofReplayCache,
@@ -36,17 +40,20 @@ function normalizeTimeout(value, fallback) {
 
 async function withTimeout(operation, timeoutMs, label = 'operation') {
   const boundedTimeout = normalizeTimeout(timeoutMs, 1);
+  const controller = new AbortController();
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new OperationTimeoutError(label, boundedTimeout)),
-      boundedTimeout,
-    );
+    timer = setTimeout(() => {
+      const error = new OperationTimeoutError(label, boundedTimeout);
+      controller.abort(error);
+      reject(error);
+    }, boundedTimeout);
   });
   try {
-    const pending = typeof operation === 'function'
-      ? Promise.resolve().then(operation)
-      : Promise.resolve(operation);
+    const pending =
+      typeof operation === 'function'
+        ? Promise.resolve().then(() => operation(controller.signal))
+        : Promise.resolve(operation);
     return await Promise.race([pending, timeout]);
   } finally {
     clearTimeout(timer);
@@ -70,25 +77,30 @@ class TwitterTask {
     this._stopRequested = false;
 
     this.usesDefaultAdapter = !options.adapterFactory;
-    this.adapterFactory = options.adapterFactory || (config => {
-      // Lazy so a missing production provider fails readiness rather than
-      // silently falling back to the legacy browser/reply implementation.
-      const XApiAdapter = require('./adapters/x-api');
-      return new XApiAdapter(config);
-    });
+    this.adapterFactory =
+      options.adapterFactory ||
+      (config => {
+        // Lazy so a missing production provider fails readiness rather than
+        // silently falling back to the legacy browser/reply implementation.
+        const XApiAdapter = require('./adapters/x-api');
+        return new XApiAdapter(config);
+      });
     this.getJSONFromCID = options.getJSONFromCID || getJSONFromCID;
     this.cidValidator = options.cidValidator || isValidCID;
     this.batchProofVerifier = options.batchProofVerifier || null;
     this.targetBindingVerifier = options.targetBindingVerifier || null;
     this.expectedProvider = EVIDENCE_PROVIDER;
     this.limits = { ...DEFAULT_PROOF_LIMITS, ...options.limits };
-    this.replayCache = options.replayCache || new ProofReplayCache(options.maxReplayEntries || 1000);
+    this.replayCache =
+      options.replayCache ||
+      new ProofReplayCache(options.maxReplayEntries || 1000);
     this.autoStart = options.autoStart !== false;
     this.expectedTarget = options.expectedTarget || {
       userId: getConsensusTargetUserId(),
     };
     this.namespaceWrapper = options.namespaceWrapper || null;
     this.localSubmitterPublicKey = options.localSubmitterPublicKey || null;
+    this.taskId = options.taskId || null;
     this.storageGetTimeoutMs = normalizeTimeout(
       options.storageGetTimeoutMs,
       DEFAULT_STORAGE_GET_TIMEOUT_MS,
@@ -107,7 +119,10 @@ class TwitterTask {
       .catch(error => {
         this.initializationError = error;
         this.isRunning = false;
-        logger.error({ err: error, round }, 'Evidence task initialization failed');
+        logger.error(
+          { err: error, round },
+          'Evidence task initialization failed',
+        );
         return false;
       });
   }
@@ -126,7 +141,7 @@ class TwitterTask {
 
   async initialize() {
     const userId = this.expectedTarget?.userId;
-    if (!/^\d{1,32}$/.test(userId || '')) {
+    if (!isCanonicalXId(userId)) {
       throw new ValidationError('A build-time KCC_TARGET_USER_ID is required', {
         field: 'KCC_TARGET_USER_ID',
         value: userId,
@@ -138,18 +153,34 @@ class TwitterTask {
       });
     }
     if (!this.localSubmitterPublicKey) {
-      const wrapper = this.namespaceWrapper ||
+      const wrapper =
+        this.namespaceWrapper ||
         require('@_koii/task-manager/namespace-wrapper').namespaceWrapper;
       const account = await wrapper.getSubmitterAccount();
       this.localSubmitterPublicKey = account?.publicKey?.toBase58?.();
     }
     if (!isValidSubmitterPublicKey(this.localSubmitterPublicKey)) {
-      throw new ValidationError('A valid local submitter public key is required', {
-        field: 'submitterPublicKey',
-        value: this.localSubmitterPublicKey,
+      throw new ValidationError(
+        'A valid local submitter public key is required',
+        {
+          field: 'submitterPublicKey',
+          value: this.localSubmitterPublicKey,
+        },
+      );
+    }
+    if (!this.taskId) {
+      this.taskId = require('@_koii/task-manager/namespace-wrapper').TASK_ID;
+    }
+    if (!isValidSubmitterPublicKey(this.taskId)) {
+      throw new ValidationError('A valid Koii task ID is required', {
+        field: 'taskId',
+        value: this.taskId,
       });
     }
-    logger.info({ target: this.expectedTarget, round: this.round }, 'Evidence task configured');
+    logger.info(
+      { target: this.expectedTarget, round: this.round },
+      'Evidence task configured',
+    );
   }
 
   async setAdapter() {
@@ -158,14 +189,17 @@ class TwitterTask {
       round: this.round,
       target: this.expectedTarget,
       submitterPublicKey: this.localSubmitterPublicKey,
+      taskId: this.taskId,
     };
     this.adapter = await this.adapterFactory(config);
-    if (!this.adapter) throw new Error('Evidence provider factory returned no adapter');
+    if (!this.adapter)
+      throw new Error('Evidence provider factory returned no adapter');
   }
 
   _launchCrawler() {
     if (this._runPromise) return this._runPromise;
-    if (this._stopRequested) throw new Error('Cannot start a stopped evidence task');
+    if (this._stopRequested)
+      throw new Error('Cannot start a stopped evidence task');
     if (!this.adapter || typeof this.adapter.search !== 'function') {
       throw new Error('Evidence provider does not implement search()');
     }
@@ -177,12 +211,16 @@ class TwitterTask {
       target: this.expectedTarget,
       action: 'observe',
       submitterPublicKey: this.localSubmitterPublicKey,
+      taskId: this.taskId,
     };
     this._runPromise = Promise.resolve()
       .then(() => this.adapter.search(query))
       .catch(error => {
         this.runError = error;
-        logger.error({ err: error, round: this.round }, 'Evidence collection failed');
+        logger.error(
+          { err: error, round: this.round },
+          'Evidence collection failed',
+        );
       })
       .finally(() => {
         this.isRunning = false;
@@ -198,27 +236,36 @@ class TwitterTask {
   async stop() {
     this._stopRequested = true;
     this.isRunning = false;
-    await withTimeout(async () => {
-      await this._readyPromise;
-      if (this.adapter && typeof this.adapter.stop === 'function') {
-        await this.adapter.stop();
-      }
-      if (this._runPromise) await this._runPromise;
-    }, this.stopSettlementTimeoutMs, 'Evidence task stop');
+    await withTimeout(
+      async () => {
+        await this._readyPromise;
+        if (this.adapter && typeof this.adapter.stop === 'function') {
+          await this.adapter.stop();
+        }
+        if (this._runPromise) await this._runPromise;
+      },
+      this.stopSettlementTimeoutMs,
+      'Evidence task stop',
+    );
   }
 
   async getRoundCID(roundID) {
     await this.ready();
     if (roundID !== this.round) {
-      throw new ValidationError('Cannot submit evidence for a different round', {
-        field: 'round',
-        value: roundID,
-      });
+      throw new ValidationError(
+        'Cannot submit evidence for a different round',
+        {
+          field: 'round',
+          value: roundID,
+        },
+      );
     }
     if (this._runPromise) await this._runPromise;
     if (this.runError) throw this.runError;
     if (!this.adapter || typeof this.adapter.getSubmissionCID !== 'function') {
-      throw new Error('Evidence provider does not implement getSubmissionCID()');
+      throw new Error(
+        'Evidence provider does not implement getSubmissionCID()',
+      );
     }
     return this.adapter.getSubmissionCID(roundID);
   }
@@ -246,8 +293,15 @@ class TwitterTask {
     if (cached.status === 'replay') return false;
     if (cached.status === 'cached') return Boolean(await cached.value);
 
-    const validation = this._validateProof(proofCid, round, submitterPublicKey).catch(error => {
-      logger.error({ err: error, proofCid, round }, 'Proof validation failed closed');
+    const validation = this._validateProof(
+      proofCid,
+      round,
+      submitterPublicKey,
+    ).catch(error => {
+      logger.error(
+        { err: error, proofCid, round },
+        'Proof validation failed closed',
+      );
       return false;
     });
     this.replayCache.set(cacheKey, round, validation);
@@ -268,16 +322,20 @@ class TwitterTask {
       expectedTarget: this.expectedTarget,
       expectedProvider: this.expectedProvider,
       submitterPublicKey,
+      taskId: this.taskId,
       limits: this.limits,
     });
 
     if (this.targetBindingVerifier) {
       for (const record of data) {
-        if (!(await this.targetBindingVerifier(record, {
-          round,
-          target: this.expectedTarget,
-          submitterPublicKey,
-        }))) {
+        if (
+          !(await this.targetBindingVerifier(record, {
+            round,
+            target: this.expectedTarget,
+            submitterPublicKey,
+            taskId: this.taskId,
+          }))
+        ) {
           return false;
         }
       }
@@ -289,13 +347,19 @@ class TwitterTask {
         ? this.adapter.verifyObservationBatch.bind(this.adapter)
         : null);
     if (verifyObservationBatch) {
-      return (await verifyObservationBatch(data, {
-        round,
-        target: this.expectedTarget,
-        submitterPublicKey,
-      })) === true;
+      return (
+        (await verifyObservationBatch(data, {
+          round,
+          target: this.expectedTarget,
+          submitterPublicKey,
+          taskId: this.taskId,
+        })) === true
+      );
     }
-    logger.error({ proofCid, round }, 'Provider has no full-proof batch verifier');
+    logger.error(
+      { proofCid, round },
+      'Provider has no full-proof batch verifier',
+    );
     return false;
   }
 }
@@ -305,7 +369,10 @@ async function getJSONFromCID(cid, fileName, retries = 3, options = {}) {
   const validator = options.cidValidator || isValidCID;
   if (!(await validator(cid))) return null;
   if (fileName !== 'dataList.json') {
-    throw new ValidationError('Unexpected proof file name', { field: 'fileName', value: fileName });
+    throw new ValidationError('Unexpected proof file name', {
+      field: 'fileName',
+      value: fileName,
+    });
   }
 
   const limits = { ...DEFAULT_PROOF_LIMITS, ...options.limits };
@@ -317,16 +384,23 @@ async function getJSONFromCID(cid, fileName, retries = 3, options = {}) {
     options.blobTextTimeoutMs,
     DEFAULT_BLOB_TEXT_TIMEOUT_MS,
   );
-  const storageClientFactory =
-    options.storageClientFactory || (() => {
-      const { KoiiStorageClient } = require('@_koii/storage-task-sdk');
-      return new KoiiStorageClient(undefined, undefined, false);
+  const storageClient =
+    options.storageClient ||
+    (options.storageClientFactory
+      ? options.storageClientFactory()
+      : require('@_koii/storage-task-sdk').KoiiStorageClient.getInstance({
+          debug: false,
+        }));
+  if (!storageClient || typeof storageClient.getFile !== 'function') {
+    throw new ValidationError('A bounded storage client is required', {
+      field: 'storageClient',
     });
+  }
 
   return withRetry(
     async () => {
       const blob = await withTimeout(
-        () => storageClientFactory().getFile(cid, fileName),
+        signal => storageClient.getFile(cid, fileName, { signal }),
         storageGetTimeoutMs,
         'IPFS proof download',
       );
@@ -337,20 +411,31 @@ async function getJSONFromCID(cid, fileName, retries = 3, options = {}) {
         });
       }
       if (blob.size > limits.maxPayloadBytes) {
-        throw new ValidationError('Proof payload is too large', { field: 'payload.size', value: blob.size });
+        throw new ValidationError('Proof payload is too large', {
+          field: 'payload.size',
+          value: blob.size,
+        });
       }
       if (typeof blob.text !== 'function') {
-        throw new ValidationError('Proof payload is not readable', { field: 'payload.text' });
+        throw new ValidationError('Proof payload is not readable', {
+          field: 'payload.text',
+        });
       }
       const text = await withTimeout(
         () => blob.text(),
         blobTextTimeoutMs,
         'IPFS proof body read',
       );
-      if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > limits.maxPayloadBytes) {
+      if (
+        typeof text !== 'string' ||
+        Buffer.byteLength(text, 'utf8') > limits.maxPayloadBytes
+      ) {
         throw new ValidationError('Proof payload is too large', {
           field: 'payload.size',
-          value: typeof text === 'string' ? Buffer.byteLength(text, 'utf8') : undefined,
+          value:
+            typeof text === 'string'
+              ? Buffer.byteLength(text, 'utf8')
+              : undefined,
         });
       }
       try {
@@ -366,7 +451,9 @@ async function getJSONFromCID(cid, fileName, retries = 3, options = {}) {
       maxRetries: retries,
       baseDelayMs: options.baseDelayMs ?? 3000,
       label: 'getJSONFromCID',
-      shouldRetry: error => !(error instanceof ValidationError),
+      shouldRetry: error =>
+        !(error instanceof ValidationError) &&
+        !(error instanceof OperationTimeoutError),
     },
   );
 }

@@ -1,0 +1,14 @@
+UNRESOLVED UPSTREAM LICENSE NOTICE
+
+Package: @_koii/task-manager@1.0.14
+Registry shasum: 33b0ff3b8162e409cb7686cd9b352d57156dcb08
+Registry integrity: sha512-RULxzji53LgIADDa3YSTSRa/nmOf4tTh0hs7pRthSt0rauhMYT0dxqJ5ZXrbNHKWJyZvq+US8teajvS4XP4a/w==
+Registry gitHead: e584bfb3f13fd93f38892402f8d99f9f32de2d8b
+Manifest declaration: ISC
+Manifest author: Koii Network
+
+The exact registry tarball omits a LICENSE file and copyright notice, and its
+manifest provides no public repository or homepage. This evidence record is not
+a substitute for the absent notice and does not clear public distribution.
+Obtain a publisher-authenticated exact notice or corrected release, then replace
+this file and remove the unresolved release gate.

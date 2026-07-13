@@ -10,8 +10,9 @@ this data flow before collecting data.
 ## Data processed
 
 The task uses the official X API to read public data for one configured public
-account. Full API responses are processed transiently for validation. The task
-is designed to place only these values in a public proof:
+account. Full API responses are processed transiently for validation. Each
+valid round proof contains exactly one live Post existence/author attestation
+and is designed to place only these values in public:
 
 - X Post IDs;
 - X User IDs; and
@@ -26,17 +27,28 @@ sanitized error categories—not raw X responses or credentials.
 
 ## Purpose and legal/policy basis
 
-The IDs are used to let independent Koii nodes confirm that a bounded,
-read-only observation occurred and reach deterministic consensus. They are not
-used for advertising, profiling, sale, or training a content model.
+The IDs let independent Koii nodes check, at audit time, that the selected Post
+still exists and is authored by the configured target. They do not prove that
+the producer performed a timeline request or discovered a new Post. They are
+not used for advertising, profiling, sale, or training a content model.
 
 Use of the X API is subject to the
 [X Developer Policy](https://docs.x.com/developer-terms/policy). Before running
 the task, the operator must obtain written X approval explicitly covering this
 rewarded, distributed Koii use case, its public recipients, and immutable IPFS
-publication of the selected Post/User IDs. The operator must use
+publication of the selected Post/User IDs. That approval must explicitly
+resolve downstream-recipient terms and deletion/modification duties because a
+public replicated IPFS proof cannot guarantee deletion. The operator must use
 least-privilege API access and record applicable redistribution limits; the code
 alone does not establish compliance.
+
+The repeated single-account observation may also fall within X's restrictions
+on investigating or tracking users or their content. Every Koii node currently
+needs its own X authentication, while X also restricts shared credentials and
+requiring service users to register overlapping applications. Deployment is
+therefore prohibited unless X approves this exact target, purpose,
+distributed-authentication model, and immutable publication in writing, or the
+architecture is redesigned and separately approved.
 
 ## Public sharing and immutability
 
@@ -55,13 +67,13 @@ replica.
 
 ## Retention
 
-Full X API responses should be discarded after transient validation and must
-not be written to IPFS or long-lived local storage. Local pending ID proofs and
-sanitized operational logs should be retained only as long as necessary for
-the active Koii round, replay prevention, security investigation, and legal
-obligations. Each operator must publish concrete local retention periods.
-Public IPFS/Koii records may remain available indefinitely for the reasons
-above.
+Full X API responses are discarded after transient validation and must not be
+written to IPFS or long-lived local storage. The reference adapter keeps at
+most 512 rounds of local ID-only observation/proof records; operators may set a
+shorter period and must publish it. Sanitized logs should be retained only as
+long as necessary for operations, replay investigation, security, and legal
+obligations. Public IPFS/Koii records may remain available indefinitely for the
+reasons above.
 
 ## Exclusions
 

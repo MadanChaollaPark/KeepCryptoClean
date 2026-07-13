@@ -1,9 +1,9 @@
 # KeepCryptoClean
 
-KeepCryptoClean is a Koii task for collecting and auditing verifiable,
-read-only public-interest observations from X through the official X API. Its
-public proof contains only policy-permitted Post IDs, User IDs, and Koii task
-metadata—never post text or a text-derived hash. The
+KeepCryptoClean is a Koii task for collecting and auditing one verifiable,
+read-only X Post existence/author attestation per round through the official X
+API. Its public proof contains only policy-permitted Post IDs, User IDs, and
+Koii task metadata—never post text or a text-derived hash. The
 original project automated replies through a browser. Version 3 removes that
 campaign behavior from the production profile and defaults to observation with
 no posting capability configured.
@@ -18,49 +18,77 @@ source tree.
 - With no credentials, collection fails closed.
 - Normal operation needs only `X_API_BEARER_TOKEN` for read-only API requests.
 - The task contains no X write credential or posting/reply path.
-- Docker and `config-task.yml` accept only a read-only bearer token and one
-  immutable target User ID.
+- The runtime accepts only a read-only bearer token. The target User ID is
+  embedded in the reviewed executable and cannot vary by node.
 - Production dependencies and bundles exclude browser automation and the old
   campaign fallback corpus.
 - Full X API responses are transient; public IPFS proofs contain only Post IDs,
   User IDs, and task metadata permitted for redistribution.
+- The rewarded unit is exactly one live Post-ID/author binding. It does not
+  claim timeline completeness, novelty, or wall-clock freshness; the same
+  still-public Post may be observed again in a later round.
+- A proof does not prove that its producer performed the timeline request. Any
+  node that already knows a still-live target Post ID can construct a valid
+  current-round envelope, and that same ID can earn again. Production requires
+  an explicit product/economic decision that this liveness-only objective is
+  worth rewarding, or a redesigned objective with independently verifiable
+  work.
+- Storage responses are streamed with hard byte/time limits, uploads are read
+  back byte-for-byte, and only an exact pinned HTTPS trust set is used.
 
 X currently prohibits non-API automation such as scripting its website. Review
 the [X automation rules](https://help.x.com/en/rules-and-policies/x-automation)
 and [X Developer Policy](https://docs.x.com/developer-terms/policy) before
 operation. Before any deployment, an operator must obtain written X approval
 that explicitly covers this rewarded, distributed Koii use case, public
-recipients, and immutable IPFS publication of Post/User IDs; redistribution
-compliance cannot be assumed from the code. If approval or policy changes, halt
-collection before creating more immutable proofs. See
+recipients, immutable IPFS publication of Post/User IDs, X's downstream-
+recipient terms, and deletion/modification obligations. The default public,
+replicated IPFS model cannot guarantee deletion, so redistribution compliance
+cannot be assumed from the code. If approval or policy changes, halt collection
+before creating more immutable proofs. Because the task repeatedly observes one
+account and requires independent nodes to authenticate to X, approval must also
+resolve X's surveillance/tracking restrictions and its prohibition on making
+end users register API applications for a service. A consented/owned target does
+not by itself resolve the distributed-credential or immutable-data issues. See
 [PRIVACY.md](PRIVACY.md).
+
+> **Current upstream blocker (verified 2026-07-13):** the pinned Koii storage,
+> testnet, and mainnet hostnames all resolved to the same parking address and
+> failed TLS. Do not deploy until Koii restores independently verifiable network
+> and storage endpoints and the full test lifecycle passes on at least two
+> nodes.
 
 ## How a round works
 
 ```text
 official X API -> transient validation -> ID-only IPFS proof -> Koii submission
                                                              |
-Koii reward distribution <- deterministic audit and voting <-+
+Koii reward distribution <- live API audit and peer voting <-+
 ```
 
-1. **Execute:** fetch eligible public data through the official API, validate it
-   transiently, and retain only permitted Post/User IDs for the round.
+1. **Execute:** fetch a bounded public timeline response through the official
+   API, validate it transiently, and freeze exactly one Post/User-ID attestation
+   for the round.
 2. **Submit:** upload the ID-only proof envelope to IPFS and submit its CID.
 3. **Audit:** retrieve peer evidence and verify its schema, identity bindings,
-   round, configured target User ID, permitted ID fields, and fresh API source.
+   round, configured target User ID, permitted ID fields, live Post existence,
+   and target-author binding through the official API.
 4. **Distribute:** deterministically allocate the configured round bounty only
    among submissions that passed consensus.
+
+The audit confirms live existence and authorship at audit time. It cannot prove
+that the submitting node made the earlier timeline request.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for trust boundaries and data
 flow.
 
 ## Requirements
 
-- Node.js `>=18.17.0`; Node 22 LTS is the production reference.
+- Node.js `>=22.22.0` and `<23`.
 - Yarn `1.22.22`, pinned through the `packageManager` field.
 - An official X API bearer token with the minimum read-only access required.
-- One numeric `X_TARGET_USER_ID`, frozen identically across every node because
-  it is a consensus input.
+- One numeric `KCC_TARGET_USER_ID`, supplied only when building; changing this
+  consensus input requires a new executable and reviewed task migration.
 - A Koii test task/runner for lifecycle and consensus validation.
 
 ## Local setup
@@ -72,7 +100,8 @@ yarn install --frozen-lockfile
 cp .env.sample .env
 ```
 
-Set `X_API_BEARER_TOKEN` and `X_TARGET_USER_ID` in `.env`, then run:
+Set `X_API_BEARER_TOKEN` and the build-only `KCC_TARGET_USER_ID` in `.env`, then
+run:
 
 ```bash
 yarn preflight:strict
@@ -85,27 +114,30 @@ The namespace wrapper exposes a local status service on
 
 ## Configuration
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `X_API_BEARER_TOKEN` | unset | Read-only official X API access. |
-| `X_TARGET_USER_ID` | unset | One numeric, consensus-critical User ID; identical on every node. |
-| `LOG_LEVEL` | `info` | Pino log level. |
-| `EXPRESS_PORT` | `3000` | Local namespace-wrapper status port. |
+| Variable             | Default | Purpose                                                                        |
+| -------------------- | ------- | ------------------------------------------------------------------------------ |
+| `X_API_BEARER_TOKEN` | unset   | Read-only official X API access.                                               |
+| `KCC_TARGET_USER_ID` | unset   | Build-only numeric User ID embedded in `dist/main.js`; not a runtime override. |
+| `KCC_RELEASE_COMMIT` | unset   | Build-only 40-character source commit recorded in release notices.             |
+| `LOG_LEVEL`          | `info`  | Pino log level.                                                                |
 
 There are no write-mode variables. Never place secrets in `config-task.yml`, a
 Docker image, logs, issues, or the task executable.
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `yarn test` | Run offline unit tests. |
-| `yarn lint` | Lint the tracked JavaScript with zero warnings allowed. |
-| `yarn build` | Build the single-file `dist/main.js` Koii executable. |
-| `yarn test:ci` | Lint, unit test, build, verify the artifact, and check repository hygiene. |
-| `yarn audit:production` | Fail on critical production dependency advisories. |
-| `yarn preflight` | Validate versions, metadata, URLs, and safe-mode configuration. |
-| `yarn preflight:strict` | Also require read-only API credentials. |
+| Command                        | Purpose                                                                     |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| `yarn test`                    | Run offline unit tests.                                                     |
+| `yarn lint`                    | Lint the tracked JavaScript with zero warnings allowed.                     |
+| `yarn build`                   | Build the single-file `dist/main.js` Koii executable.                       |
+| `yarn test:ci`                 | Preflight, lint, test, build, license/artifact smoke, and hygiene gates.    |
+| `yarn verify:licenses`         | Verify bundled copyleft notices and the exact permitted package/version.    |
+| `yarn verify:licenses:release` | Fail unless release provenance and every authoritative notice are complete. |
+| `yarn audit:production`        | Gate advisories against the reviewed, expiring exception register.          |
+| `yarn audit:all`               | Apply the same gate to the full build toolchain.                            |
+| `yarn preflight`               | Validate versions, metadata, URLs, and safe-mode configuration.             |
+| `yarn preflight:strict`        | Also require read-only API credentials.                                     |
 
 ## Docker
 
@@ -114,6 +146,8 @@ The local container builds the same executable, runs as the unprivileged
 status port to localhost, and has a health check.
 
 ```bash
+export KCC_TARGET_USER_ID=1234567890  # replace with the reviewed target
+export KCC_RELEASE_COMMIT="$(git rev-parse HEAD)"
 docker compose config --quiet
 docker compose up --build
 docker compose ps
@@ -126,18 +160,30 @@ the Compose service as a replacement for testnet validation.
 ## Koii release
 
 `config-task.yml` follows the current Koii task template shape and remains on
-`environment: 'TEST'`. Build and inspect the artifact before invoking the
-create-task CLI:
+`environment: 'TEST'`. Build and inspect the artifact before any remote tool is
+introduced:
 
 ```bash
+export KCC_TARGET_USER_ID=1234567890  # replace with the reviewed target
+export KCC_RELEASE_COMMIT="$(git rev-parse HEAD)"
 yarn test:ci
 yarn preflight:strict
-yarn deploy
+yarn audit:all
+yarn verify:licenses:release
 ```
 
-`yarn deploy` is interactive and can create or update remote Koii state. Run it
-only after completing [docs/RELEASE.md](docs/RELEASE.md), confirming funding,
-task ID, environment, and rollback ownership. The code does not deploy itself.
+The strict license command intentionally fails for the current candidate: the
+three exact Koii packages listed in `THIRD_PARTY_NOTICES.md` do not contain
+publisher-authenticated full license notices. Do not distribute the executable
+until corrected upstream packages/notices or an explicit legal exception closes
+that gate.
+
+The repository intentionally does not bundle a deployment CLI: the previously
+used CLI dependency brought unresolved high/critical build-tool advisories.
+After completing [docs/RELEASE.md](docs/RELEASE.md), use the then-current
+official Koii deployment surface in a separate, pinned, audited environment and
+confirm funding, task ID, environment, and rollback ownership immediately
+before the remote action. The code does not deploy itself.
 
 Useful upstream references:
 
@@ -160,6 +206,7 @@ rewrite or force-push remote history as part of a code release.
 - [Operations](docs/OPERATIONS.md)
 - [Release checklist](docs/RELEASE.md)
 - [Dependency advisory register](docs/DEPENDENCY_EXCEPTIONS.md)
+- [Third-party notices and relinking information](THIRD_PARTY_NOTICES.md)
 - [Security policy](SECURITY.md)
 - [Privacy policy](PRIVACY.md)
 - [Contributing](CONTRIBUTING.md)

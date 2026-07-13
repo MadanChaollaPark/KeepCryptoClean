@@ -1,0 +1,16 @@
+UNRESOLVED UPSTREAM LICENSE NOTICE
+
+Package: @_koii/storage-task-sdk@1.2.8
+Registry shasum: cb0e976c9c30242a7a35dcaa24f76674cc3f386f
+Registry integrity: sha512-shjkwaGKv/XNU/XcKx8Y17DDqeScZ0R+nMh0kfhDAKdn/tSmX4kOKCK6JYdfGiBgASa26DBbSK9MWq0l81iuvw==
+Registry gitHead: 1df356773c21a6a4a4e8903f7fdd80d6d09f4639
+Manifest repository: git@gitlab.com:koii-network/dev-green/koii-ipfs-task-sdk.git
+Manifest declaration: MIT
+Manifest author: Syed Ghazanfer Anwar <s.ghazanferanwar@gmail.com>
+
+The exact registry tarball omits a LICENSE file and copyright notice, and the
+manifest repository was not publicly accessible during the 2026-07-13 review.
+This evidence record is not a substitute for the absent notice and does not
+clear public distribution. Obtain a publisher-authenticated exact notice or
+corrected release, then replace this file and remove the unresolved release
+gate.

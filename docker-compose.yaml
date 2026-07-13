@@ -7,6 +7,7 @@ services:
       target: runtime
       args:
         KCC_TARGET_USER_ID: ${KCC_TARGET_USER_ID:-}
+        KCC_RELEASE_COMMIT: ${KCC_RELEASE_COMMIT:-}
     image: keep-crypto-clean:local
     init: true
     restart: unless-stopped
@@ -17,15 +18,18 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 128
+    cpus: 2.0
+    mem_limit: 2g
+    stop_grace_period: 25s
     environment:
       NODE_ENV: production
-      EXPRESS_PORT: '3000'
+      KCC_STATUS_HOST: 0.0.0.0
       LOG_LEVEL: ${LOG_LEVEL:-info}
       X_API_BEARER_TOKEN: ${X_API_BEARER_TOKEN:-}
     ports:
       - '127.0.0.1:${TASK_HTTP_PORT:-3000}:3000'
     tmpfs:
-      - /tmp:size=64m,mode=1777
+      - /tmp:size=64m,mode=1777,noexec,nosuid
     volumes:
       - task_runtime:/app/runtime
 

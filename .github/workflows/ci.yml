@@ -16,6 +16,7 @@ concurrency:
 env:
   NODE_ENV: test
   KCC_TARGET_USER_ID: '1234567890'
+  KCC_RELEASE_COMMIT: ${{ github.sha }}
 
 jobs:
   quality:
@@ -38,7 +39,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: koii-task-executable
-          path: dist/main.js
+          path: |
+            dist/main.js
+            dist/THIRD_PARTY_BUNDLE_NOTICES.txt
           if-no-files-found: error
           retention-days: 7
 
@@ -56,6 +59,7 @@ jobs:
           corepack enable
           corepack prepare yarn@1.22.22 --activate
       - run: yarn audit:production
+      - run: yarn audit:all
 
   container:
     name: Hardened container
@@ -66,14 +70,21 @@ jobs:
       - name: Validate Compose configuration
         run: docker compose config --quiet
       - name: Build production image
-        run: docker build --build-arg KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" --target runtime --tag keep-crypto-clean:ci .
+        run: docker build --build-arg KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" --build-arg KCC_RELEASE_COMMIT="$KCC_RELEASE_COMMIT" --target runtime --tag keep-crypto-clean:ci .
       - name: Verify non-root image user
         run: test "$(docker image inspect --format '{{.Config.User}}' keep-crypto-clean:ci)" = node
       - name: Smoke health endpoint
         run: |
           docker run --detach --name keep-crypto-clean-ci \
             --publish 127.0.0.1:3000:3000 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --mount type=volume,source=keep-crypto-clean-ci-runtime,target=/app/runtime \
             --env X_API_BEARER_TOKEN=ci-placeholder-not-a-token \
+            --env KCC_STATUS_HOST=0.0.0.0 \
             keep-crypto-clean:ci
           for attempt in $(seq 1 20); do
             if curl --fail --silent http://127.0.0.1:3000/healthz >/dev/null; then

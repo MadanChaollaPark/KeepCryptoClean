@@ -14,19 +14,19 @@ cp .env.sample .env
 yarn test:ci
 ```
 
-Node 22 LTS is the reference runtime; the package minimum remains Node 18.17 to
-match the supported Koii template contract. Unit tests and CI must not need
-network access or secrets.
+Node 22.22.x is the supported runtime. Unit tests and CI must not need network
+access or secrets.
 
 ## Required checks
 
 ```bash
 yarn lint
 yarn test:unit
-yarn build
-yarn verify:artifact
+KCC_TARGET_USER_ID=1234567890 yarn build
+KCC_TARGET_USER_ID=1234567890 yarn verify:artifact
 yarn check:repository
 yarn audit:production
+yarn audit:all
 docker compose config --quiet
 ```
 
@@ -38,6 +38,10 @@ check `continue-on-error` merely to merge a change.
 - Preserve the strictly read-only design; an X write path is out of scope.
 - Parse untrusted data into a strict bounded schema before using it.
 - Bind evidence to the expected target, round, node identity, and source ID.
+- Preserve the exactly-one live existence/author attestation contract; do not
+  claim timeline completeness, novelty, or wall-clock freshness.
+- Keep the consensus target embedded at build time; do not restore a per-node
+  target variable.
 - Use deterministic inputs for consensus and distribution logic.
 - Return invalid on validation uncertainty; never approve because a dependency
   or network call failed.

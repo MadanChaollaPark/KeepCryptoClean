@@ -2,7 +2,7 @@
 
 const http = require('node:http');
 
-const port = Number(process.env.EXPRESS_PORT || 3000);
+const port = 3000;
 const request = http.get(
   {
     host: '127.0.0.1',

@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+require('dotenv').config({ path: path.join(root, '.env') });
+const { isCanonicalXId } = require('../lib/identifiers');
 const strict = process.argv.includes('--strict');
 const failures = [];
 const warnings = [];
@@ -18,8 +20,13 @@ function atLeast(current, minimum) {
   return true;
 }
 
-if (!atLeast(process.versions.node, '18.17.0')) {
-  failures.push(`Node ${process.versions.node} is unsupported; use >=18.17.0 (22 LTS recommended).`);
+if (
+  !atLeast(process.versions.node, '22.22.0') ||
+  atLeast(process.versions.node, '23.0.0')
+) {
+  failures.push(
+    `Node ${process.versions.node} is unsupported; use >=22.22.0 and <23.`,
+  );
 }
 
 const requiredFiles = [
@@ -39,7 +46,28 @@ const metadata = JSON.parse(
   fs.readFileSync(path.join(root, 'metadata.json'), 'utf8'),
 );
 const taskConfig = fs.readFileSync(path.join(root, 'config-task.yml'), 'utf8');
-const canonicalRepository = 'https://github.com/MadanChaollaPark/KeepCryptoClean';
+const canonicalRepository =
+  'https://github.com/MadanChaollaPark/KeepCryptoClean';
+
+function yamlScalar(key) {
+  const prefix = `${key}:`;
+  const matches = taskConfig
+    .split(/\r?\n/)
+    .filter(line => line.startsWith(prefix));
+  if (matches.length !== 1) {
+    failures.push(`config-task.yml must contain exactly one top-level ${key}.`);
+    return null;
+  }
+  const raw = matches[0].slice(prefix.length).trim();
+  if (
+    raw.length >= 2 &&
+    ((raw.startsWith("'") && raw.endsWith("'")) ||
+      (raw.startsWith('"') && raw.endsWith('"')))
+  ) {
+    return raw.slice(1, -1);
+  }
+  return raw;
+}
 
 if (!packageJson.repository.url.includes('MadanChaollaPark/KeepCryptoClean')) {
   failures.push('package.json repository is not canonical.');
@@ -50,52 +78,92 @@ if (metadata.repositoryUrl !== canonicalRepository) {
 if (!metadata.privacyPolicyUrl?.endsWith('/PRIVACY.md')) {
   failures.push('metadata.json privacyPolicyUrl is missing or non-canonical.');
 }
-if (!taskConfig.includes(`repositoryUrl: '${canonicalRepository}'`)) {
+if (yamlScalar('repositoryUrl') !== canonicalRepository) {
   failures.push('config-task.yml repositoryUrl is not canonical.');
 }
-if (!taskConfig.includes("environment: 'TEST'")) {
-  warnings.push('config-task.yml is not constrained to the Koii TEST environment.');
+if (yamlScalar('environment') !== 'TEST') {
+  failures.push(
+    'config-task.yml must remain constrained to Koii TEST until promotion review.',
+  );
 }
-if (!taskConfig.includes("task_type: 'KOII'")) {
-  warnings.push('Review the configured token type before funding a task.');
+if (yamlScalar('task_type') !== 'KOII') {
+  failures.push('config-task.yml must use the reviewed KOII token type.');
 }
 if (taskConfig.includes("value: 'X_TARGET_USER_ID'")) {
-  failures.push('The consensus target must be embedded at build time, not supplied as a node task variable.');
+  failures.push(
+    'The consensus target must be embedded at build time, not supplied as a node task variable.',
+  );
 }
 
 if (!process.env.X_API_BEARER_TOKEN) {
-  const message = 'X_API_BEARER_TOKEN is unset; observation calls will fail closed.';
+  const message =
+    'X_API_BEARER_TOKEN is unset; observation calls will fail closed.';
   if (strict) failures.push(message);
   else warnings.push(message);
 }
 if (process.env.X_TARGET_USER_ID) {
-  failures.push('X_TARGET_USER_ID is unsupported; use build-time KCC_TARGET_USER_ID.');
+  failures.push(
+    'X_TARGET_USER_ID is unsupported; use build-time KCC_TARGET_USER_ID.',
+  );
 }
 if (!process.env.KCC_TARGET_USER_ID) {
-  const message = 'KCC_TARGET_USER_ID is unset; no build-time consensus target is configured.';
+  const message =
+    'KCC_TARGET_USER_ID is unset; no build-time consensus target is configured.';
   if (strict) failures.push(message);
   else warnings.push(message);
-} else if (!/^\d{1,20}$/.test(process.env.KCC_TARGET_USER_ID)) {
-  failures.push('KCC_TARGET_USER_ID must be a numeric X User ID (1-20 digits).');
+} else if (!isCanonicalXId(process.env.KCC_TARGET_USER_ID)) {
+  failures.push(
+    'KCC_TARGET_USER_ID must be a canonical positive X User ID (1-19 digits).',
+  );
 }
 
-const roundSlots = Number(taskConfig.match(/^round_time:\s*(\d+)\s*$/m)?.[1]);
+const roundSlots = Number(yamlScalar('round_time'));
+const auditSlots = Number(yamlScalar('audit_window'));
+const submissionSlots = Number(yamlScalar('submission_window'));
 const slotSeconds = 0.408;
 const rollingWindowSeconds = 30 * 24 * 60 * 60;
-const maxIdsPerRound = 100;
+const maxIdsPerRound = 1;
 const redistributionCap = 1_500_000;
 if (!Number.isSafeInteger(roundSlots) || roundSlots <= 0) {
   failures.push('config-task.yml round_time must be a positive integer.');
 } else {
+  if (
+    !Number.isSafeInteger(auditSlots) ||
+    auditSlots <= 0 ||
+    !Number.isSafeInteger(submissionSlots) ||
+    submissionSlots <= 0 ||
+    auditSlots + submissionSlots >= roundSlots
+  ) {
+    failures.push(
+      'Audit and submission windows must be positive and leave execution time in each round.',
+    );
+  }
   // Add one boundary round to stay conservative when a 30-day window starts
   // immediately before a round boundary.
-  const maximumRounds = Math.ceil(rollingWindowSeconds / (roundSlots * slotSeconds)) + 1;
+  const maximumRounds =
+    Math.ceil(rollingWindowSeconds / (roundSlots * slotSeconds)) + 1;
   const maximumRedistributedIds = maximumRounds * maxIdsPerRound;
   if (maximumRedistributedIds > redistributionCap) {
     failures.push(
       `Configured cadence can redistribute up to ${maximumRedistributedIds} Post IDs per 30 days, above the ${redistributionCap} cap.`,
     );
   }
+}
+
+const totalBounty = Number(yamlScalar('total_bounty_amount'));
+const roundBounty = Number(yamlScalar('bounty_amount_per_round'));
+if (
+  !Number.isFinite(totalBounty) ||
+  totalBounty <= 0 ||
+  !Number.isFinite(roundBounty) ||
+  roundBounty <= 0 ||
+  roundBounty > totalBounty ||
+  !Number.isSafeInteger(totalBounty * 1_000_000_000) ||
+  !Number.isSafeInteger(roundBounty * 1_000_000_000)
+) {
+  failures.push(
+    'KOII bounty values must be positive, bounded, and exactly representable in atomic units.',
+  );
 }
 
 for (const warning of warnings) console.warn(`WARN: ${warning}`);

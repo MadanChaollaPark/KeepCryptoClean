@@ -1,0 +1,32 @@
+POST-RELEASE UPSTREAM LICENSE CLARIFICATION
+
+Package: tr46@0.0.3
+Release gitHead: a8009f9ce80ff5dbe71dd71e203afe4e4c878d28
+Registry integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==
+The exact release manifest declares MIT but the tarball omits a full notice.
+Upstream added this full notice at commit 3a6f29721e7063b9ffd421e461a54beae6170001 on 2016-08-02:
+https://github.com/jsdom/tr46/commit/3a6f29721e7063b9ffd421e461a54beae6170001
+Upstream notice SHA-256: eeed1ca176eebad5c73870e233cfff03981fecd319c969475dfa3633036c336b
+
+----- UPSTREAM NOTICE -----
+The MIT License (MIT)
+
+Copyright (c) 2016 Sebastian Mayr
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

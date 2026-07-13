@@ -6,6 +6,26 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 
+const requiredDockerIgnorePatterns = [
+  '.env',
+  '.env.*',
+  '*.pem',
+  '*.key',
+  '*.p12',
+  '*.pfx',
+  '*wallet*.json',
+  '*keypair*.json',
+  'taskStateInfoKeypair.json',
+  'puppeteer_cache_*',
+  '**/puppeteer_cache_*',
+  'chrome-profile',
+  'chromium-profile',
+  'user-data',
+  'bodyHTML.html',
+  'passwordHTML.html',
+  'usernameHTML.html',
+];
+
 function trackedFiles() {
   try {
     return execFileSync('git', ['ls-files', '-z'], {
@@ -53,7 +73,10 @@ const forbiddenPaths = [
 ];
 
 const secretPatterns = [
-  { pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/, reason: 'private key' },
+  {
+    pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+    reason: 'private key',
+  },
   { pattern: /\bgh[pousr]_[A-Za-z0-9]{30,}\b/, reason: 'GitHub token' },
   { pattern: /\bAKIA[0-9A-Z]{16}\b/, reason: 'AWS access key' },
   { pattern: /\bnpm_[A-Za-z0-9]{30,}\b/, reason: 'npm token' },
@@ -77,8 +100,51 @@ function isPlaceholder(rawValue) {
 }
 
 const violations = [];
+const files = trackedFiles();
+const dockerIgnore = new Set(
+  fs
+    .readFileSync(path.join(root, '.dockerignore'), 'utf8')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#')),
+);
+for (const pattern of requiredDockerIgnorePatterns) {
+  if (!dockerIgnore.has(pattern)) {
+    violations.push(`.dockerignore: missing sensitive context rule ${pattern}`);
+  }
+}
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(root, 'package.json'), 'utf8'),
+);
+const forbiddenPackages = new Set([
+  'bcryptjs',
+  'cheerio',
+  'puppeteer',
+  'puppeteer-core',
+  'puppeteer-chromium-resolver',
+  'twitter-api-v2',
+]);
+for (const dependencyGroup of [
+  'dependencies',
+  'devDependencies',
+  'optionalDependencies',
+]) {
+  for (const name of Object.keys(packageJson[dependencyGroup] || {})) {
+    if (forbiddenPackages.has(name)) {
+      violations.push(
+        `package.json: forbidden browser/write dependency ${name}`,
+      );
+    }
+  }
+}
 
-for (const relativePath of trackedFiles()) {
+if (files.some(file => file.startsWith('adapters/twitter/'))) {
+  violations.push(
+    'adapters/twitter/: legacy website-scripting source is forbidden',
+  );
+}
+
+for (const relativePath of files) {
   const normalizedPath = relativePath.replaceAll('\\', '/');
 
   for (const rule of forbiddenPaths) {

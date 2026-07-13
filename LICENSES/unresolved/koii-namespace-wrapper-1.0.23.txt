@@ -1,0 +1,15 @@
+UNRESOLVED UPSTREAM LICENSE NOTICE
+
+Package: @_koii/namespace-wrapper@1.0.23
+Registry shasum: 56ca75d7b00dc1120dbf3052e3ba0f361d742847
+Registry integrity: sha512-QE0AYsq0Bo9SRiuIAOZuboHvcjI9eXk1kDb6S923R1BWhli0TOcwdATs0ElWuLvGq1uAW7rfGHQQCBOgoOImgg==
+Registry gitHead: 14fa6da1f900b268c91c93b33357b74967a2b74b
+Public source commit: https://github.com/koii-network/namespace-wrapper/commit/14fa6da1f900b268c91c93b33357b74967a2b74b
+Manifest declaration: ISC
+Manifest author: Koii Network
+
+The exact registry tarball and public source commit omit a LICENSE file. The
+README says to see that missing file. This evidence record is not a substitute
+for the absent copyright/license notice and does not clear public distribution.
+Obtain a publisher-authenticated exact notice or corrected release, then replace
+this file and remove the unresolved release gate.

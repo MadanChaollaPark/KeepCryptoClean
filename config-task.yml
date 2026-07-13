@@ -2,7 +2,7 @@
 # docs/RELEASE.md has been completed against a real Koii test task.
 task_name: 'KeepCryptoClean Observer'
 author: 'Madan Chaolla Park and contributors'
-description: 'A safe-by-default Koii task that records and audits read-only observations from the official X API. Public proofs contain only Post IDs, User IDs, and Koii task metadata; posting is disabled in this deployment profile.'
+description: 'A safe-by-default Koii task that records and audits one live Post-ID/target-author attestation per round through the official X API. Public proofs contain only Post IDs, User IDs, and Koii task metadata; they do not claim novelty, freshness, or timeline completeness, and posting is disabled.'
 repositoryUrl: 'https://github.com/MadanChaollaPark/KeepCryptoClean'
 imageUrl: 'https://opengraph.githubassets.com/keepcryptoclean/MadanChaollaPark/KeepCryptoClean'
 infoUrl: 'https://github.com/MadanChaollaPark/KeepCryptoClean#readme'

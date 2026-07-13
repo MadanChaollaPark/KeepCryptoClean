@@ -2,8 +2,8 @@
 
 ## Objective
 
-KeepCryptoClean turns a bounded official-API observation into an ID-only proof
-that independent Koii nodes can validate deterministically. It is not a general
+KeepCryptoClean turns one bounded official-API Post existence/author
+attestation into an ID-only proof that independent Koii nodes can validate. It is not a general
 X client, content archive, campaign bot, or browser automation service.
 
 ## Components
@@ -27,9 +27,11 @@ allowlisted target   fail-closed gate    local namespace   peer fetch
   distribution logic.
 - `twitter-task.js` (retained name for compatibility) constructs and validates
   round evidence.
-- `adapters/twitter/` contains only the official read-only X API client/policy.
+- `adapters/x-api/` contains the official read-only X API client and policy
+  boundary.
 - `model/data.js` wraps namespace-scoped persistence.
-- `lib/` contains cryptography, errors, retries, and structured logging.
+- `lib/` contains proof validation, errors, retries, deterministic
+  distribution, and redacted structured logging.
 - `webpack.config.js` creates one self-contained `dist/main.js` executable.
 
 The current Koii template separates developer callbacks from lifecycle plumbing
@@ -40,15 +42,16 @@ listener or independently submit the same phase.
 
 ### Observer (default)
 
-The adapter requires `X_API_BEARER_TOKEN` and `X_TARGET_USER_ID`, makes
-read-only official X API requests, validates the response transiently, and
-produces no write action. Only policy-permitted Post IDs and User IDs cross into
-the proof builder. Missing configuration, a target mismatch, malformed data, or
-an API error produces no valid proof.
+The adapter requires `X_API_BEARER_TOKEN`; the numeric target User ID is
+embedded in the executable from `KCC_TARGET_USER_ID` during the reviewed build.
+It makes read-only official X API requests, validates the response transiently,
+and produces no write action. Only policy-permitted Post IDs and User IDs cross
+into the proof builder. Missing configuration, a target mismatch, malformed
+data, or an API error produces no valid proof.
 
-The target User ID is a consensus input, not a per-node preference. Every node
-must use the same frozen numeric ID. A configuration mismatch invalidates the
-round; the task must never fall back to a username or another account.
+The target User ID is a consensus input, not a per-node preference. A bundled
+task reads only its embedded value and ignores node-local target variables. The
+task must never fall back to a username or another account.
 
 The adapter exposes no X write method and accepts no user access token,
 password, cookie, or browser session.
@@ -58,9 +61,12 @@ password, cookie, or browser session.
 ### Execute
 
 The task manager passes a numeric round. Execution resolves the configured
-target, fetches bounded public data, validates it in memory, discards content
-fields, and stores only permitted IDs plus Koii task metadata for that round. It
-must await every asynchronous Koii value before serializing it.
+target, fetches a bounded public timeline response, validates it in memory,
+discards content fields, and freezes exactly one permitted ID/author binding
+plus Koii task metadata for that round. This is a live existence attestation,
+not a claim that the ID is new or that the proof covers the account's timeline.
+Because a known live ID is sufficient to construct the envelope, peer audit
+cannot prove that the producer actually performed this timeline request.
 
 ### Submit
 
@@ -78,13 +84,20 @@ then checks, at minimum:
 
 - supported schema and mode;
 - expected Koii round and submitting node;
-- exact configured target User ID and Post/User source identifiers;
+- exactly one configured-target Post/User source binding;
 - an allowlist of permitted proof fields (unknown fields are rejected);
 - duplicate/replay rules; and
-- fresh official-source agreement when external validation is required.
+- live official-API existence and target-author agreement.
 
 Timeout, unavailable source, malformed evidence, identity mismatch, and any
 exception are invalid outcomes, never implicit approval.
+
+The validation rules are fixed, but the audit result is not intrinsically
+deterministic: X content can be deleted or protected, and nodes can encounter
+different rate limits or outages between votes. Production testing must measure
+that divergence explicitly; the deterministic property applies to reward-map
+calculation after Koii finalizes audit results, not to the mutable external
+observation itself.
 
 ### Distribution
 
@@ -95,14 +108,15 @@ selection, on-chain submission, and distribution audit plumbing.
 
 ## Trust boundaries
 
-| Boundary | Untrusted input | Required control |
-| --- | --- | --- |
-| X API | JSON, IDs, text, timestamps, rate-limit responses | Transient validation, timeout, size/schema limits, exact target check, discard content fields |
-| IPFS | CID and ID-only proof bytes | CID syntax, byte limit before JSON parse, strict allowed fields, schema/version, identity and round binding |
-| Koii peers | submissions, public keys, votes | Wrapper-provided identity, deterministic validation, fail closed |
-| Environment | tokens, target, feature flags | Exact modes, least privilege, redaction, no serialization |
-| Local state | prior rounds and pending evidence | Namespace isolation, unique keys, bounded retention, atomic updates |
-| HTTP status | unauthenticated local request | Health only, localhost binding, no secrets/task internals |
+| Boundary       | Untrusted input                                   | Required control                                                                                            |
+| -------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| X API          | JSON, IDs, text, timestamps, rate-limit responses | Transient validation, timeout, size/schema limits, exact target/author check, discard content fields        |
+| IPFS           | CID and ID-only proof bytes                       | CID syntax, byte limit before JSON parse, strict allowed fields, schema/version, identity and round binding |
+| Koii peers     | submissions, public keys, votes                   | Wrapper-provided identity, fixed validation rules, fail closed                                              |
+| Environment    | bearer token, logging, local status host          | Least privilege, redaction, no serialization into proofs                                                    |
+| Build artifact | target User ID and provider                       | Canonical positive ID, embedded immutable value, artifact verification                                      |
+| Local state    | prior rounds and pending evidence                 | Namespace isolation, unique keys, bounded retention, atomic updates                                         |
+| HTTP status    | unauthenticated local request                     | Health only, localhost binding, no secrets/task internals                                                   |
 
 ## Build and container boundary
 
@@ -119,6 +133,14 @@ testnet correctness.
 ## Operational invariants
 
 - One configured observation target per task deployment.
+- Exact-pinned, install-time verified fail-closed patches for task-manager
+  1.0.14, namespace-wrapper 1.0.23, and storage-task-sdk 1.2.8; dependency
+  upgrades must re-audit or remove the affected patch.
+- The task is KOII-only. The namespace wrapper's optional KPL/WASM decoder is
+  removed from the executable so a single-file upload cannot reach a missing
+  sidecar binary or silently acquire an unreviewed Rust/Zstd license graph.
+- Exactly one ID-only live existence/author attestation per valid proof; no
+  completeness, novelty, or freshness claim.
 - No production website scripting.
 - No X content fields or derivatives in immutable storage; only redistribution-
   permitted Post/User IDs and Koii task metadata.

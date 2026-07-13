@@ -1,19 +1,23 @@
 const path = require('path');
 const webpack = require('webpack');
+const { isCanonicalXId } = require('./lib/identifiers');
+const { BundleLicensePlugin } = require('./scripts/bundle-license-plugin');
+
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 module.exports = (_env, argv = {}) => {
   const production = argv.mode === 'production';
   const consensusTargetUserId = process.env.KCC_TARGET_USER_ID || '';
 
-  if (production && !/^\d{1,20}$/.test(consensusTargetUserId)) {
+  if (production && !isCanonicalXId(consensusTargetUserId)) {
     throw new Error(
-      'KCC_TARGET_USER_ID must be a numeric X User ID (1-20 digits) when building the production task.',
+      'KCC_TARGET_USER_ID must be a numeric X User ID (1-19 digits) when building the production task.',
     );
   }
 
   return {
     entry: './index.js',
-    target: 'node18',
+    target: 'node22',
     mode: production ? 'production' : 'development',
     devtool: production ? false : 'inline-source-map',
     output: {
@@ -31,6 +35,13 @@ module.exports = (_env, argv = {}) => {
       runtimeChunk: false,
     },
     plugins: [
+      new webpack.BannerPlugin({
+        banner:
+          'KeepCryptoClean 3.0.0. Complete project and bundled third-party ' +
+          'license notices are embedded at the end of this executable and ' +
+          'emitted as THIRD_PARTY_BUNDLE_NOTICES.txt.',
+      }),
+      new BundleLicensePlugin(),
       new webpack.DefinePlugin({
         __KCC_BUNDLED__: JSON.stringify(true),
         __KCC_TARGET_USER_ID__: JSON.stringify(consensusTargetUserId),

@@ -14,8 +14,20 @@ test('source execution accepts only the explicit build-time target variable', ()
     getConsensusTargetUserId({ KCC_TARGET_USER_ID: '1234567890' }),
     '1234567890',
   );
-  assert.equal(getConsensusTargetUserId({ X_TARGET_USER_ID: '1234567890' }), null);
-  assert.equal(getConsensusTargetUserId({ KCC_TARGET_USER_ID: 'screen-name' }), null);
+  assert.equal(
+    getConsensusTargetUserId({ X_TARGET_USER_ID: '1234567890' }),
+    null,
+  );
+  assert.equal(
+    getConsensusTargetUserId({ KCC_TARGET_USER_ID: 'screen-name' }),
+    null,
+  );
+  assert.equal(getConsensusTargetUserId({ KCC_TARGET_USER_ID: '0' }), null);
+  assert.equal(getConsensusTargetUserId({ KCC_TARGET_USER_ID: '00042' }), null);
+  assert.equal(
+    getConsensusTargetUserId({ KCC_TARGET_USER_ID: '12345678901234567890' }),
+    null,
+  );
 });
 
 test('consensus provider is constant and not environment-overridable', () => {

@@ -6,8 +6,8 @@ const { CoreLogic } = require('../../coreLogic');
 
 const TARGET = { userId: '123456789' };
 const SUBMITTER = '11111111111111111111111111111111';
-const COPIER = '22222222222222222222222222222222';
-const NOW = Math.floor(Date.now() / 1000);
+const COPIER = 'SysvarRent111111111111111111111111111111111';
+const TASK_ID = 'Vote111111111111111111111111111111111111111';
 
 function observation(id = '1000000000000000001') {
   return {
@@ -18,8 +18,8 @@ function observation(id = '1000000000000000001') {
     tweetId: id,
     round: 4,
     targetUserId: TARGET.userId,
-    observedAt: NOW,
     submitterPublicKey: SUBMITTER,
+    taskId: TASK_ID,
   };
 }
 
@@ -41,6 +41,7 @@ test('TwitterTask resolves and passes the local Koii submitter key to the produc
   let config;
   const task = new TwitterTask(4, {
     expectedTarget: TARGET,
+    taskId: TASK_ID,
     autoStart: false,
     namespaceWrapper: {
       async getSubmitterAccount() {
@@ -54,6 +55,7 @@ test('TwitterTask resolves and passes the local Koii submitter key to the produc
   });
   await task.ready();
   assert.equal(config.submitterPublicKey, SUBMITTER);
+  assert.equal(config.taskId, TASK_ID);
   await task.stop();
 });
 
@@ -66,6 +68,7 @@ test('TwitterTask readiness launches observer and submission waits for collectio
   const task = new TwitterTask(4, {
     expectedTarget: TARGET,
     localSubmitterPublicKey: SUBMITTER,
+    taskId: TASK_ID,
     adapterFactory: async config =>
       adapter({
         async search(query) {
@@ -81,20 +84,25 @@ test('TwitterTask readiness launches observer and submission waits for collectio
   await task.ready();
   const cidPromise = task.getRoundCID(4);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.some(([name]) => name === 'cid'), false);
+  assert.equal(
+    calls.some(([name]) => name === 'cid'),
+    false,
+  );
   release();
   assert.equal(await cidPromise, 'bafy-proof');
   assert.equal(calls[0][2].action, 'observe');
   assert.equal(calls[0][2].submitterPublicKey, SUBMITTER);
+  assert.equal(calls[0][2].taskId, TASK_ID);
   await task.stop();
 });
 
 test('TwitterTask validates every record with provider batch verification', async () => {
   let verified;
-  const proof = [observation(), observation('1000000000000000002')];
+  const proof = [observation()];
   const task = new TwitterTask(4, {
     expectedTarget: TARGET,
     localSubmitterPublicKey: SUBMITTER,
+    taskId: TASK_ID,
     autoStart: false,
     adapterFactory: async () =>
       adapter({
@@ -107,9 +115,10 @@ test('TwitterTask validates every record with provider batch verification', asyn
     getJSONFromCID: async () => proof,
   });
   assert.equal(await task.validate('bafy-proof', 4, SUBMITTER), true);
-  assert.equal(verified.records.length, 2);
+  assert.equal(verified.records.length, 1);
   assert.deepEqual(verified.context.target, TARGET);
   assert.equal(verified.context.submitterPublicKey, SUBMITTER);
+  assert.equal(verified.context.taskId, TASK_ID);
   assert.equal(
     await task.validate('bafy-proof', 4, COPIER),
     false,
@@ -126,6 +135,7 @@ test('TwitterTask fails closed without full-proof provider verification', async 
   const task = new TwitterTask(4, {
     expectedTarget: TARGET,
     localSubmitterPublicKey: SUBMITTER,
+    taskId: TASK_ID,
     autoStart: false,
     adapterFactory: async () => adapter({ verifyObservationBatch: undefined }),
     cidValidator: async () => true,
@@ -139,7 +149,12 @@ test('bounded IPFS reader rejects oversized and malformed payloads without retry
   const storageClientFactory = () => ({
     async getFile() {
       calls += 1;
-      return { size: 20, async text() { return '{not json'; } };
+      return {
+        size: 20,
+        async text() {
+          return '{not json';
+        },
+      };
     },
   });
   await assert.rejects(
@@ -168,24 +183,63 @@ test('bounded IPFS reader rejects oversized and malformed payloads without retry
       cidValidator: async () => true,
       storageClientFactory: () => ({
         async getFile() {
-          return { async text() { textCalled = true; return '[]'; } };
+          return {
+            async text() {
+              textCalled = true;
+              return '[]';
+            },
+          };
         },
       }),
     }),
     /size is unavailable/,
   );
-  assert.equal(textCalled, false, 'body must not be read before a finite size is known');
+  assert.equal(
+    textCalled,
+    false,
+    'body must not be read before a finite size is known',
+  );
 
   await assert.rejects(
     getJSONFromCID('bafy-proof', 'dataList.json', 0, {
       cidValidator: async () => true,
       storageGetTimeoutMs: 5,
       storageClientFactory: () => ({
-        getFile() { return new Promise(() => {}); },
+        getFile() {
+          return new Promise(() => {});
+        },
       }),
     }),
     /IPFS proof download timed out/,
   );
+
+  let timedOutCalls = 0;
+  let timeoutAborted = false;
+  await assert.rejects(
+    getJSONFromCID('bafy-proof', 'dataList.json', 3, {
+      cidValidator: async () => true,
+      storageGetTimeoutMs: 5,
+      baseDelayMs: 0,
+      storageClientFactory: () => ({
+        getFile(_cid, _fileName, { signal }) {
+          timedOutCalls += 1;
+          return new Promise((resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                timeoutAborted = true;
+                reject(signal.reason);
+              },
+              { once: true },
+            );
+          });
+        },
+      }),
+    }),
+    /IPFS proof download timed out/,
+  );
+  assert.equal(timedOutCalls, 1);
+  assert.equal(timeoutAborted, true);
 
   await assert.rejects(
     getJSONFromCID('bafy-proof', 'dataList.json', 0, {
@@ -193,7 +247,12 @@ test('bounded IPFS reader rejects oversized and malformed payloads without retry
       blobTextTimeoutMs: 5,
       storageClientFactory: () => ({
         async getFile() {
-          return { size: 2, text() { return new Promise(() => {}); } };
+          return {
+            size: 2,
+            text() {
+              return new Promise(() => {});
+            },
+          };
         },
       }),
     }),
@@ -204,18 +263,24 @@ test('bounded IPFS reader rejects oversized and malformed payloads without retry
 test('TwitterTask stop waits for provider cancellation and is itself bounded', async () => {
   let release;
   let stopCalled = false;
-  const running = new Promise(resolve => { release = resolve; });
+  const running = new Promise(resolve => {
+    release = resolve;
+  });
   const task = new TwitterTask(4, {
     expectedTarget: TARGET,
     localSubmitterPublicKey: SUBMITTER,
+    taskId: TASK_ID,
     stopSettlementTimeoutMs: 100,
-    adapterFactory: async () => adapter({
-      search() { return running; },
-      async stop() {
-        stopCalled = true;
-        release();
-      },
-    }),
+    adapterFactory: async () =>
+      adapter({
+        search() {
+          return running;
+        },
+        async stop() {
+          stopCalled = true;
+          release();
+        },
+      }),
   });
   await task.ready();
   await task.stop();
@@ -225,11 +290,15 @@ test('TwitterTask stop waits for provider cancellation and is itself bounded', a
   const stuck = new TwitterTask(4, {
     expectedTarget: TARGET,
     localSubmitterPublicKey: SUBMITTER,
+    taskId: TASK_ID,
     stopSettlementTimeoutMs: 5,
-    adapterFactory: async () => adapter({
-      search() { return new Promise(() => {}); },
-      async stop() {},
-    }),
+    adapterFactory: async () =>
+      adapter({
+        search() {
+          return new Promise(() => {});
+        },
+        async stop() {},
+      }),
   });
   await stuck.ready();
   await assert.rejects(stuck.stop(), /Evidence task stop timed out/);
@@ -274,10 +343,51 @@ test('CoreLogic node and distribution validation fail closed', async () => {
       throw new Error('offline');
     },
   };
-  const core = new CoreLogic({ TaskClass: class {}, namespaceWrapper: wrapper });
+  const core = new CoreLogic({
+    TaskClass: class {},
+    namespaceWrapper: wrapper,
+  });
   assert.equal(await core.validateNode('cid', 1, SUBMITTER), false);
   assert.equal(await core.validateDistribution('submitter', 1), false);
   assert.equal(await core.validateDistribution(null, 1), false);
+});
+
+test('CoreLogic never submits a legacy distribution after an unaccepted upload', async () => {
+  let onChainCalls = 0;
+  const core = new CoreLogic({
+    namespaceWrapper: {
+      async uploadDistributionList() {
+        return false;
+      },
+      async distributionListSubmissionOnChain() {
+        onChainCalls += 1;
+      },
+    },
+  });
+  core.generateDistributionList = async () => ({ [SUBMITTER]: 1 });
+  await assert.rejects(
+    core.submitDistributionList(4),
+    /DISTRIBUTION LIST UPLOAD WAS NOT ACCEPTED/,
+  );
+  assert.equal(onChainCalls, 0);
+});
+
+test('CoreLogic rejects an invalid legacy on-chain submission response', async () => {
+  const core = new CoreLogic({
+    namespaceWrapper: {
+      async uploadDistributionList() {
+        return true;
+      },
+      async distributionListSubmissionOnChain() {
+        return { error: 'offline' };
+      },
+    },
+  });
+  core.generateDistributionList = async () => ({ [SUBMITTER]: 1 });
+  await assert.rejects(
+    core.submitDistributionList(4),
+    /DISTRIBUTION LIST ON-CHAIN SUBMISSION FAILED/,
+  );
 });
 
 test('CoreLogic passes the task-manager submitter key into proof validation', async () => {
