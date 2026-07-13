@@ -13,6 +13,13 @@ package identities are pinned in `LICENSES/bundle-identities.txt`; Webpack's
 build-generated runtime is recorded separately. An unreviewed graph, notice
 source, README extraction, or identity drift fails the build.
 
+The sidecar also records a SHA-256 of every executable byte before the embedded
+notice. Both artifact verifiers recompute that digest, so payload changes cannot
+hide behind an unchanged valid notice suffix. The public-release command forces
+a fresh frozen install, performs two deterministic rebuilds from a clean Git
+checkout, compares their hashes, and then applies the strict notice/provenance
+gate.
+
 The executable records the canonical source repository, exact release commit,
 pinned Node/Yarn toolchain, lockfile, local dependency-patch script, and rebuild
 instructions. Candidate builds may say `UNRECORDED - RELEASE BLOCKED`; public

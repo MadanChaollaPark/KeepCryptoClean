@@ -57,6 +57,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Architecture, operations, release, security, and contribution runbooks.
 - Bundled LGPL notice, full LGPLv3/GPLv3 texts, hash verification, and artifact
   attribution.
+- Exact final-chunk license inventory, executable-payload digest binding, and a
+  clean-source deterministic public-release rebuild gate.
 
 ### Removed
 

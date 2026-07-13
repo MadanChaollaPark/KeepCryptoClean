@@ -4,6 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const {
+  BEGIN_MARKER,
+  END_MARKER,
+  verifyBundleIntegrity,
+} = require('./bundle-notice-integrity');
 
 const root = path.resolve(__dirname, '..');
 const nodeModules = path.join(root, 'node_modules');
@@ -13,8 +18,6 @@ const strictRelease = process.argv.includes('--release');
 let embeddedReleaseCommit = '';
 const allowedCopyleft = new Set(['rpc-websockets@7.11.2|LGPL-3.0-only']);
 const bundleNoticeName = 'THIRD_PARTY_BUNDLE_NOTICES.txt';
-const beginMarker = 'BEGIN KEEPCRYPTOCLEAN BUNDLE LICENSE NOTICES';
-const endMarker = 'END KEEPCRYPTOCLEAN BUNDLE LICENSE NOTICES';
 const unresolvedKoiiPackages = new Set([
   '@_koii/namespace-wrapper@1.0.23',
   '@_koii/storage-task-sdk@1.2.8',
@@ -102,25 +105,14 @@ if (!fs.existsSync(artifact)) {
   } else {
     const bundleNoticeBytes = fs.readFileSync(bundleNoticePath);
     const bundleNotice = bundleNoticeBytes.toString('utf8');
-    const digest = crypto
-      .createHash('sha256')
-      .update(bundleNoticeBytes)
-      .digest('hex');
-    const expectedSuffix = Buffer.from(
-      `\n/*! ${beginMarker}\nSHA-256: ${digest}\n${bundleNotice}${endMarker} */\n`,
+    failures.push(
+      ...verifyBundleIntegrity(artifactBytes, bundleNoticeBytes).failures,
     );
-    if (
-      artifactBytes.length < expectedSuffix.length ||
-      !artifactBytes.subarray(-expectedSuffix.length).equals(expectedSuffix)
-    ) {
-      failures.push(
-        'dist/main.js does not end with an exact digest-bound copy of the notice sidecar.',
-      );
-    }
     for (const marker of [
       'rpc-websockets@7.11.2 | LGPL-3.0-only',
       'Build-generated runtime: webpack@5.108.4 | MIT',
       'Source repository: https://github.com/MadanChaollaPark/KeepCryptoClean',
+      'Pre-notice executable SHA-256:',
       'Rebuild/relink: yarn install --frozen-lockfile',
       '===== COMPLETE LGPL-3.0-ONLY TEXT =====',
       '===== COMPLETE GPL-3.0-ONLY TEXT REFERENCED BY LGPLV3 =====',
@@ -132,7 +124,7 @@ if (!fs.existsSync(artifact)) {
       }
     }
 
-    for (const marker of [beginMarker, endMarker]) {
+    for (const marker of [BEGIN_MARKER, END_MARKER]) {
       const occurrences = text.split(marker).length - 1;
       if (occurrences !== 1) {
         failures.push(
@@ -196,11 +188,44 @@ if (!fs.existsSync(artifact)) {
       }
     }
 
-    embeddedReleaseCommit =
-      bundleNotice.match(/^Release commit: (.+)$/m)?.[1] || '';
+    const canonicalRepository =
+      'https://github.com/MadanChaollaPark/KeepCryptoClean';
+    const sourceLines = [
+      ...bundleNotice.matchAll(/^Source repository: (.+)$/gm),
+    ].map(match => match[1]);
+    const releaseLines = [
+      ...bundleNotice.matchAll(/^Release commit: (.+)$/gm),
+    ].map(match => match[1]);
+    const correspondingSourceLines = [
+      ...bundleNotice.matchAll(/^Complete Corresponding Source: (.+)$/gm),
+    ].map(match => match[1]);
+    if (sourceLines.length !== 1 || sourceLines[0] !== canonicalRepository) {
+      failures.push(
+        'Bundle notice must contain exactly one canonical Source repository line.',
+      );
+    }
+    if (releaseLines.length !== 1) {
+      failures.push(
+        'Bundle notice must contain exactly one Release commit line.',
+      );
+    }
+    if (correspondingSourceLines.length !== 1) {
+      failures.push(
+        'Bundle notice must contain exactly one Complete Corresponding Source line.',
+      );
+    }
+    embeddedReleaseCommit = releaseLines[0] || '';
     if (strictRelease && !/^[0-9a-f]{40}$/.test(embeddedReleaseCommit)) {
       failures.push(
         'Public release is blocked: rebuild with a lowercase 40-character KCC_RELEASE_COMMIT.',
+      );
+    }
+    const expectedSource = /^[0-9a-f]{40}$/.test(embeddedReleaseCommit)
+      ? `${canonicalRepository}/tree/${embeddedReleaseCommit}`
+      : canonicalRepository;
+    if (correspondingSourceLines[0] !== expectedSource) {
+      failures.push(
+        `Complete Corresponding Source must be exactly ${expectedSource}.`,
       );
     }
   }

@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(root, '.env') });
 const { isCanonicalXId } = require('../lib/identifiers');
+const { verifyBundleIntegrity } = require('./bundle-notice-integrity');
 const dist = path.join(root, 'dist');
 const artifact = path.join(dist, 'main.js');
 const failures = [];
@@ -74,6 +75,16 @@ if (fs.existsSync(dist)) {
   if (executableFiles.length !== 1 || executableFiles[0] !== 'main.js') {
     failures.push(
       `Expected one executable (main.js), found: ${executableFiles.join(', ') || 'none'}.`,
+    );
+  }
+
+  const bundleNotice = path.join(dist, 'THIRD_PARTY_BUNDLE_NOTICES.txt');
+  if (fs.existsSync(artifact) && fs.existsSync(bundleNotice)) {
+    failures.push(
+      ...verifyBundleIntegrity(
+        fs.readFileSync(artifact),
+        fs.readFileSync(bundleNotice),
+      ).failures,
     );
   }
 }

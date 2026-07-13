@@ -23,6 +23,9 @@ does not prove production readiness.
       texts match their pinned hashes.
 - [ ] `KCC_RELEASE_COMMIT` is the lowercase 40-character reviewed commit and
       the embedded Complete Corresponding Source link resolves to it.
+- [ ] The strict release gate forced a frozen reinstall, produced two identical
+      artifacts, and verified the pre-notice executable digest as well as the
+      exact embedded notice suffix.
 - [ ] Publisher-authenticated full license notices or corrected releases exist
       for `@_koii/namespace-wrapper@1.0.23`,
       `@_koii/storage-task-sdk@1.2.8`, and

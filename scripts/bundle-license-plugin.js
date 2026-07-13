@@ -1,15 +1,18 @@
 'use strict';
 
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { builtinModules } = require('node:module');
 const path = require('node:path');
 const webpack = require('webpack');
+const {
+  BEGIN_MARKER,
+  END_MARKER,
+  embeddedSuffix,
+  sha256,
+} = require('./bundle-notice-integrity');
 
 const PLUGIN_NAME = 'KeepCryptoCleanBundleLicensePlugin';
 const NOTICE_ASSET = 'THIRD_PARTY_BUNDLE_NOTICES.txt';
-const BEGIN_MARKER = 'BEGIN KEEPCRYPTOCLEAN BUNDLE LICENSE NOTICES';
-const END_MARKER = 'END KEEPCRYPTOCLEAN BUNDLE LICENSE NOTICES';
 const MAX_LICENSE_FILE_BYTES = 1024 * 1024;
 const canonicalSourceRepository =
   'https://github.com/MadanChaollaPark/KeepCryptoClean';
@@ -139,10 +142,6 @@ const reviewedReadmeNotices = new Map([
     },
   ],
 ]);
-
-function sha256(value) {
-  return crypto.createHash('sha256').update(value).digest('hex');
-}
 
 function normalizeText(value) {
   return value.replace(/\r\n?/g, '\n').trimEnd() + '\n';
@@ -367,13 +366,15 @@ function packageRecord(packageRoot, projectRoot) {
 }
 
 function recordDigest(record) {
-  return crypto
-    .createHash('sha256')
-    .update(JSON.stringify(record))
-    .digest('hex');
+  return sha256(JSON.stringify(record));
 }
 
-function renderInventory(packageRoots, projectRoot, runtimeRecord) {
+function renderInventory(
+  packageRoots,
+  projectRoot,
+  runtimeRecord,
+  preNoticeDigest,
+) {
   const records = new Map();
   const packageErrors = [];
   for (const packageRoot of packageRoots) {
@@ -445,6 +446,7 @@ function renderInventory(packageRoots, projectRoot, runtimeRecord) {
     '',
     'This deterministic inventory covers third-party application packages in the final dist/main.js chunk.',
     'The complete text is also embedded at the end of that executable.',
+    `Pre-notice executable SHA-256: ${preNoticeDigest}`,
     `Source repository: ${canonicalSourceRepository}`,
     `Release commit: ${releaseCommit || 'UNRECORDED - RELEASE BLOCKED'}`,
     `Complete Corresponding Source: ${sourceLocation}`,
@@ -536,27 +538,31 @@ class BundleLicensePlugin {
             path.dirname(require.resolve('webpack/package.json')),
             projectRoot,
           );
+          const mainAsset = compilation.getAsset('main.js');
+          if (!mainAsset) throw new Error('main.js was not emitted');
+          const preNoticeSource = mainAsset.source.source();
+          const preNoticeBytes = Buffer.isBuffer(preNoticeSource)
+            ? preNoticeSource
+            : Buffer.from(preNoticeSource);
           const inventory = renderInventory(
             packageRoots,
             projectRoot,
             runtimeRecord,
+            sha256(preNoticeBytes),
           );
           if (inventory.includes('*/')) {
             throw new Error(
               'Bundle license inventory contains a comment terminator',
             );
           }
-          const digest = crypto
-            .createHash('sha256')
-            .update(inventory)
-            .digest('hex');
-          const mainAsset = compilation.getAsset('main.js');
-          if (!mainAsset) throw new Error('main.js was not emitted');
-          const embedded = `\n/*! ${BEGIN_MARKER}\nSHA-256: ${digest}\n${inventory}${END_MARKER} */\n`;
+          const embedded = embeddedSuffix(Buffer.from(inventory));
 
           compilation.updateAsset(
             'main.js',
-            new webpack.sources.ConcatSource(mainAsset.source, embedded),
+            new webpack.sources.ConcatSource(
+              mainAsset.source,
+              embedded.toString('utf8'),
+            ),
           );
           compilation.emitAsset(
             NOTICE_ASSET,

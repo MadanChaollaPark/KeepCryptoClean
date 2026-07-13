@@ -24,7 +24,7 @@
     "preflight:strict": "node scripts/preflight.js --strict",
     "verify:artifact": "node scripts/verify-artifact.js",
     "verify:licenses": "node scripts/verify-licenses.js",
-    "verify:licenses:release": "node scripts/verify-licenses.js --release",
+    "verify:licenses:release": "node scripts/verify-release.js",
     "smoke:artifact": "node scripts/smoke-artifact.js",
     "check:repository": "node scripts/check-repository-hygiene.js",
     "audit:production": "node scripts/audit-production.js",
