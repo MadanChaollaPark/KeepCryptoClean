@@ -449,7 +449,7 @@ function renderInventory(
     `Source repository: ${canonicalSourceRepository}`,
     `Release commit: ${releaseCommit || 'UNRECORDED - RELEASE BLOCKED'}`,
     `Complete Corresponding Source: ${sourceLocation}`,
-    'The source includes package.json, yarn.lock, webpack.config.js, and scripts/patch-task-manager.js.',
+    'The source includes package.json, yarn.lock, webpack.config.js, scripts/build.js, and scripts/patch-task-manager.js.',
     'Pinned toolchain: Node.js 22.22.0 and Yarn 1.22.22.',
     'Rebuild/relink: yarn install --frozen-lockfile',
     'Rebuild/relink: KCC_TARGET_USER_ID=<embedded numeric X User ID> yarn build',

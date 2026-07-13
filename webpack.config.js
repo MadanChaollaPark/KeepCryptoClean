@@ -3,15 +3,24 @@ const webpack = require('webpack');
 const { isCanonicalXId } = require('./lib/identifiers');
 const { BundleLicensePlugin } = require('./scripts/bundle-license-plugin');
 
-require('dotenv').config({ path: path.resolve(__dirname, '.env') });
-
-module.exports = (_env, argv = {}) => {
+module.exports = (env = {}, argv = {}) => {
   const production = argv.mode === 'production';
-  const consensusTargetUserId = process.env.KCC_TARGET_USER_ID || '';
+  const consensusTargetUserId =
+    typeof env.publicTargetUserId === 'string' ? env.publicTargetUserId : '';
+  const releaseCommit =
+    typeof env.releaseCommit === 'string' ? env.releaseCommit : '';
 
-  if (production && !isCanonicalXId(consensusTargetUserId)) {
+  if (
+    (production || consensusTargetUserId) &&
+    !isCanonicalXId(consensusTargetUserId)
+  ) {
     throw new Error(
       'KCC_TARGET_USER_ID must be a numeric X User ID (1-19 digits) when building the production task.',
+    );
+  }
+  if (releaseCommit && !/^[0-9a-f]{40}$/.test(releaseCommit)) {
+    throw new Error(
+      'KCC_RELEASE_COMMIT must be a lowercase 40-character Git commit.',
     );
   }
 
@@ -42,7 +51,7 @@ module.exports = (_env, argv = {}) => {
           'emitted as THIRD_PARTY_BUNDLE_NOTICES.txt.',
       }),
       new BundleLicensePlugin({
-        releaseCommit: process.env.KCC_RELEASE_COMMIT || '',
+        releaseCommit,
       }),
       new webpack.DefinePlugin({
         __KCC_BUNDLED__: JSON.stringify(true),
