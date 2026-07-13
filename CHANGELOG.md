@@ -1,37 +1,67 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project loosely follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Dates are in `YYYY-MM-DD`.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
-- `CONTRIBUTING.md`, `SECURITY.md`, `docs/ARCHITECTURE.md`, and `tests/README.md`.
-- Per-method JSDoc across `coreLogic.js`, `twitter-task.js`, `model/data.js`, and the `lib/*` modules.
-- File header on `index.js` documenting the IPC event → `coreLogic` method mapping.
-- Annotated `.env.sample` with the optional `COOKIE_ENCRYPTION_KEY` and `LOG_LEVEL` variables.
-- Expanded `adapters/twitter/README.md` with the module-split overview.
+### Security
 
-### Notes
-- This release is documentation-only; no code paths changed.
+- Remote history remediation and credential/session rotation remain an operator
+  action; see `SECURITY.md`.
+- Promotion from Koii `TEST` to `PRODUCTION` remains gated by the release
+  checklist and a separate reviewed configuration change.
 
-## [2.0.0] — 2025-04-07
+## [3.0.0] - 2026-07-13
 
 ### Changed
-- **Breaking refactor**: split the monolithic `adapters/twitter/twitter.js` into focused modules (`session.js`, `crawler.js`, `commenter.js`, `verifier.js`, `utils.js`). Public API on the `Twitter` class is unchanged.
-- Switched ad-hoc `console.log` calls to a structured pino logger (`lib/logger.js`).
-- Introduced typed error classes in `lib/errors.js` (`TwitterAuthError`, `RateLimitError`, `NetworkError`, `BrowserError`, `ValidationError`).
-- Cookie storage now uses AES-256-GCM via `lib/crypto.js` with the `COOKIE_ENCRYPTION_KEY` env var. Legacy plaintext cookies are still readable for one boot.
-- Retry behaviour centralised in `lib/retry.js` (`withRetry` with exponential backoff + jitter).
+
+- Reframed the task as a safe-by-default, official-X-API observation task.
+- Removed all X write behavior and credentials; the rewarded task is strictly
+  read-only.
+- Removed legacy browser automation and browser tooling from the production
+  dependency/runtime profile.
+- Aligned lifecycle plumbing with `@_koii/task-manager` 1.0.14,
+  `@_koii/namespace-wrapper` 1.0.23, and the current Koii template contract.
+- Bound evidence validation to schema, target, source, round, and node identity;
+  hardened size/time/replay checks and deterministic distribution handling.
+- Updated canonical repository URLs, author, MIT license, task name, metadata,
+  KOII bounty configuration, and Koii `TEST` environment.
 
 ### Added
-- `prod-debug.js` workflow (`yarn prod-debug`) — watches local changes, rebuilds, and copies the bundle into the Desktop Node runtime folder for live debugging.
-- README expanded with overview, architecture, prerequisites, and key concepts.
 
-## [1.x] — earlier history
+- Node 22 reference runtime, pinned Yarn 1.22.22, frozen lockfile install, and a
+  verified single-file production bundle.
+- Patched transitive resolutions that remove all high/critical production audit
+  findings, plus a time-bounded register for remaining upstream findings.
+- Offline unit/validation coverage, strict preflight, artifact verification,
+  and repository hygiene/secret guards.
+- GitHub Actions CI, CodeQL, dependency review, Dependabot, issue forms, and a
+  pull-request checklist.
+- Multi-stage non-root Docker image, localhost-only Compose service, dropped
+  capabilities, read-only filesystem, and `/healthz` probe.
+- Architecture, operations, release, security, and contribution runbooks.
 
-Earlier work tracked the `@JDVance` target account, fixed audit/submission flows, and shipped the initial `update the task` series of changes. See the git log (`git log --before=2025-04-07 --oneline`) for details.
+### Removed
 
-[Unreleased]: https://github.com/MadanChaollaPark/KeepCryptoClean/compare/v2.0.0...HEAD
+- The campaign/insult fallback corpus and its production build path.
+- Stale Redis/Koii container wiring, missing bind mounts, obsolete direct
+  dependencies, and scripts that installed floating CLI versions.
+- Browser credentials as production task requirements.
+
+## [2.0.0] - 2025-04-07
+
+### Changed
+
+- Split the monolithic browser adapter into session, crawler, commenter,
+  verifier, and utility modules.
+- Introduced structured logging, typed errors, retry helpers, and encrypted
+  legacy cookie storage.
+
+## [1.x] - 2024
+
+- Initial browser-posting Koii prototype and campaign variants.
+
+[Unreleased]: https://github.com/MadanChaollaPark/KeepCryptoClean/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/MadanChaollaPark/KeepCryptoClean/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/MadanChaollaPark/KeepCryptoClean/releases/tag/v2.0.0

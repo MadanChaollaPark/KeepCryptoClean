@@ -1,0 +1,45 @@
+name: Bug report
+description: Report reproducible task behavior that is not security-sensitive.
+title: '[Bug]: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include tokens, passwords, cookies, wallet files, or browser profiles.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 3.0.0 or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Koii test task
+        - Local observer
+        - Docker observer
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include sanitized steps, expected behavior, and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, cookies, wallet material, and personal data.
+          required: true

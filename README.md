@@ -1,300 +1,171 @@
-# KeepCryptoClean (Asshole in Chief)
+# KeepCryptoClean
 
-A decentralized Twitter engagement task running on the [Koii Network](https://www.koii.network). Nodes crawl a target Twitter account, post accountability comments, and earn rewards through a validated proof-of-work system backed by IPFS.
+KeepCryptoClean is a Koii task for collecting and auditing verifiable,
+read-only public-interest observations from X through the official X API. Its
+public proof contains only policy-permitted Post IDs, User IDs, and Koii task
+metadata—never post text or a text-derived hash. The
+original project automated replies through a browser. Version 3 removes that
+campaign behavior from the production profile and defaults to observation with
+no posting capability configured.
 
-## Table of Contents
+The repository is a production candidate, but it is deliberately configured as
+a Koii `TEST` task until the testnet gates in [docs/RELEASE.md](docs/RELEASE.md)
+are completed. No live task, bounty, or token deployment is implied by this
+source tree.
 
-- [Overview](#overview)
-- [How It Works](#how-it-works)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Running the Task](#running-the-task)
-- [Development](#development)
-- [Testing](#testing)
-- [Project Structure](#project-structure)
-- [Key Concepts](#key-concepts)
-- [Further Documentation](#further-documentation)
-- [License](#license)
+## Safety model
 
-## Overview
+- With no credentials, collection fails closed.
+- Normal operation needs only `X_API_BEARER_TOKEN` for read-only API requests.
+- The task contains no X write credential or posting/reply path.
+- Docker and `config-task.yml` accept only a read-only bearer token and one
+  immutable target User ID.
+- Production dependencies and bundles exclude browser automation and the old
+  campaign fallback corpus.
+- Full X API responses are transient; public IPFS proofs contain only Post IDs,
+  User IDs, and task metadata permitted for redistribution.
 
-KeepCryptoClean coordinates a network of volunteer-operated nodes that post comments on a target Twitter account's tweets. Each node:
+X currently prohibits non-API automation such as scripting its website. Review
+the [X automation rules](https://help.x.com/en/rules-and-policies/x-automation)
+and [X Developer Policy](https://docs.x.com/developer-terms/policy) before
+operation. Before any deployment, an operator must obtain written X approval
+that explicitly covers this rewarded, distributed Koii use case, public
+recipients, and immutable IPFS publication of Post/User IDs; redistribution
+compliance cannot be assumed from the code. If approval or policy changes, halt
+collection before creating more immutable proofs. See
+[PRIVACY.md](PRIVACY.md).
 
-1. Authenticates with Twitter using Puppeteer (headless browser automation)
-2. Crawls the target account's tweets
-3. Posts one comment per day from a curated comment library
-4. Submits proof of work to IPFS
-5. Validates other nodes' submissions
-6. Receives reward distributions for valid work
+## How a round works
 
-The task is rate-limited to **one comment per account every ~24 hours** to avoid account suspension.
-
-## How It Works
-
-Each task round (~3.8 hours) follows four phases:
-
-```
-Execute -> Submit -> Audit -> Distribute
-```
-
-1. **Execute**: The node logs into Twitter, finds target tweets, and posts a comment. Collected data is stored in a local NeDB database.
-2. **Submit**: The node packages collected tweet data as JSON, uploads it to IPFS via KoiiStorageClient, and submits the resulting CID (Content Identifier) to the blockchain.
-3. **Audit**: Nodes validate other nodes' submissions by fetching IPFS data and spot-checking a random item against the live Twitter page.
-4. **Distribute**: Valid submissions earn rewards; invalid submissions result in stake slashing.
-
-## Architecture
-
-```
-index.js                    Entry point & IPC message handler
-  |
-  +-- coreLogic.js          Task lifecycle orchestration
-  |     |
-  |     +-- twitter-task.js TwitterTask class (crawler + validator)
-  |           |
-  |           +-- adapters/twitter/twitter.js  Puppeteer-based Twitter automation
-  |           +-- model/data.js                NeDB database abstraction
-  |           +-- model/adapter.js             Base adapter class
-  |
-  +-- @_koii/namespace-wrapper   Koii Network IPC & task state
-  +-- @_koii/storage-task-sdk    IPFS storage (KoiiStorageClient)
+```text
+official X API -> transient validation -> ID-only IPFS proof -> Koii submission
+                                                             |
+Koii reward distribution <- deterministic audit and voting <-+
 ```
 
-### Core Components
+1. **Execute:** fetch eligible public data through the official API, validate it
+   transiently, and retain only permitted Post/User IDs for the round.
+2. **Submit:** upload the ID-only proof envelope to IPFS and submit its CID.
+3. **Audit:** retrieve peer evidence and verify its schema, identity bindings,
+   round, configured target User ID, permitted ID fields, and fresh API source.
+4. **Distribute:** deterministically allocate the configured round bounty only
+   among submissions that passed consensus.
 
-| File | Purpose |
-|------|---------|
-| `index.js` | Entry point. Sets up IPC listeners and an Express endpoint (`GET /taskState`). |
-| `coreLogic.js` | Orchestrates the task lifecycle: execute, submit, audit, and distribute. |
-| `twitter-task.js` | Manages the Twitter crawler per round. Handles search term fetching, CID generation, and submission validation. |
-| `adapters/twitter/twitter.js` | Puppeteer-based Twitter automation: login, session management, tweet crawling, comment posting, and verification. |
-| `model/data.js` | NeDB database wrapper with methods for CRUD operations, search terms, timestamps, and cookies. |
-| `model/adapter.js` | Abstract base class for API adapters. Extended by the Twitter adapter. |
-| `couch_comments.json` | Fallback comment library used when the middleware server is unavailable. |
-| `config-task.yml` | Koii Network task configuration (round timing, stake amounts, resource requirements). |
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for trust boundaries and data
+flow.
 
-## Prerequisites
+## Requirements
 
-- **Node.js** v16 or higher
-- **Yarn** package manager
-- A **volunteer Twitter/X account** that has passed Twitter's verification process
-- For production deployment: [Koii Network Node](https://www.koii.network)
+- Node.js `>=18.17.0`; Node 22 LTS is the production reference.
+- Yarn `1.22.22`, pinned through the `packageManager` field.
+- An official X API bearer token with the minimum read-only access required.
+- One numeric `X_TARGET_USER_ID`, frozen identically across every node because
+  it is a consensus input.
+- A Koii test task/runner for lifecycle and consensus validation.
 
-### System Requirements (for Koii Network deployment)
-
-| Resource | Minimum |
-|----------|---------|
-| CPU | 4 cores |
-| RAM | 5 GB |
-| Storage | 5 GB |
-
-## Installation
+## Local setup
 
 ```bash
-git clone https://github.com/chaollapark/KeepCryptoClean.git
-cd KeepCryptoClean
-yarn install
-```
-
-## Configuration
-
-Copy the sample environment file and fill in your Twitter credentials:
-
-```bash
+corepack enable
+corepack prepare yarn@1.22.22 --activate
+yarn install --frozen-lockfile
 cp .env.sample .env
 ```
 
-Edit `.env`:
-
-```env
-TWITTER_USERNAME="your_twitter_username"
-TWITTER_PASSWORD="your_twitter_password"
-TWITTER_PHONE="your_phone_number_or_email"
-```
-
-| Variable | Description |
-|----------|-------------|
-| `TWITTER_USERNAME` | Your volunteer Twitter username (without the `@`) |
-| `TWITTER_PASSWORD` | Your volunteer Twitter account password |
-| `TWITTER_PHONE` | Phone number or email used for Twitter's verification step |
-
-> **Warning**: Use a dedicated volunteer account, not your primary Twitter account.
-
-## Running the Task
-
-### Via Koii Network Node (Production)
-
-1. Download the [Koii Network Node](https://www.koii.network)
-2. Sign up and configure your node ([instructions](https://www.koii.network/docs))
-3. Click **"Add Task"** and upload the project
-
-![Adding Task](./images/AddingTask.png)
-
-4. Configure your Twitter credentials as task variables
-5. Run the task
-
-### Via Docker
+Set `X_API_BEARER_TOKEN` and `X_TARGET_USER_ID` in `.env`, then run:
 
 ```bash
-docker-compose up
-```
-
-This starts:
-- A **Redis** container for caching/sessions
-- A **Koii task node** container running the task
-
-### Locally (for development)
-
-```bash
+yarn preflight:strict
+yarn test:ci
 yarn start
 ```
 
-## Development
+The namespace wrapper exposes a local status service on
+`http://127.0.0.1:3000` by default. Do not publish it to the internet.
 
-### Available Scripts
+## Configuration
 
-| Command | Description |
-|---------|-------------|
-| `yarn start` | Start the task node (`node index.js`) |
-| `yarn test` | Run the basic single-round test |
-| `yarn webpack` | Build with webpack (development mode) |
-| `yarn webpack:prod` | Build with webpack (production mode) |
-| `yarn deploy` | Build and deploy to Koii Network via CLI |
-| `yarn whammy` | Shortcut for `webpack:prod` + `deploy` |
-| `yarn prod-debug` | Start with nodemon for production debugging |
-| `yarn go` | Full cycle: install, start, test |
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `X_API_BEARER_TOKEN` | unset | Read-only official X API access. |
+| `X_TARGET_USER_ID` | unset | One numeric, consensus-critical User ID; identical on every node. |
+| `LOG_LEVEL` | `info` | Pino log level. |
+| `EXPRESS_PORT` | `3000` | Local namespace-wrapper status port. |
 
-### Building for Deployment
+There are no write-mode variables. Never place secrets in `config-task.yml`, a
+Docker image, logs, issues, or the task executable.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `yarn test` | Run offline unit tests. |
+| `yarn lint` | Lint the tracked JavaScript with zero warnings allowed. |
+| `yarn build` | Build the single-file `dist/main.js` Koii executable. |
+| `yarn test:ci` | Lint, unit test, build, verify the artifact, and check repository hygiene. |
+| `yarn audit:production` | Fail on critical production dependency advisories. |
+| `yarn preflight` | Validate versions, metadata, URLs, and safe-mode configuration. |
+| `yarn preflight:strict` | Also require read-only API credentials. |
+
+## Docker
+
+The local container builds the same executable, runs as the unprivileged
+`node` user, drops Linux capabilities, mounts only a runtime volume, binds the
+status port to localhost, and has a health check.
 
 ```bash
-# Development build
-yarn webpack
+docker compose config --quiet
+docker compose up --build
+docker compose ps
+```
 
-# Production build
-yarn webpack:prod
+This is a local smoke/observer environment. A Koii chain participant must run
+the reviewed `dist/main.js` under the supported Koii task runner; do not treat
+the Compose service as a replacement for testnet validation.
 
-# Build and deploy to Koii Network
+## Koii release
+
+`config-task.yml` follows the current Koii task template shape and remains on
+`environment: 'TEST'`. Build and inspect the artifact before invoking the
+create-task CLI:
+
+```bash
+yarn test:ci
+yarn preflight:strict
 yarn deploy
 ```
 
-### Understanding the Koii Network
+`yarn deploy` is interactive and can create or update remote Koii state. Run it
+only after completing [docs/RELEASE.md](docs/RELEASE.md), confirming funding,
+task ID, environment, and rollback ownership. The code does not deploy itself.
 
-To modify and extend this code, familiarize yourself with the Koii Network:
+Useful upstream references:
 
-1. **[EZsandbox](https://github.com/koii-network/ezsandbox/blob/main/README.md)** - A guided tutorial covering Koii Network basics
-2. **[Koii Network Documentation](https://www.koii.network/docs)** - Full documentation
+- [Koii task template](https://github.com/koii-network/task-template)
+- [Koii developer documentation](https://www.koii.network/docs)
+- [GitHub supply-chain security](https://docs.github.com/en/code-security/supply-chain-security)
 
-## Testing
+## Security history
 
-```bash
-# Run the default test (single round)
-yarn test
+An earlier commit exposed Chromium profile artifacts in public Git history.
+Deleting them in a later commit did not erase the old objects. Treat every
+credential and session that ever entered the repository as compromised: rotate
+credentials, revoke sessions, and coordinate a separately authorized history
+rewrite. See [SECURITY.md](SECURITY.md). This repository intentionally does not
+rewrite or force-push remote history as part of a code release.
 
-# Run individual test files
-node tests/test-one-round.js
-node tests/twitter.js [search_term]     # Defaults to "Web3" if no term provided
-node tests/test-several-rounds.js
-node tests/test-validate-cid.js
-node tests/testAudits.js
-```
+## Documentation
 
-### Test Files
-
-| File | Description |
-|------|-------------|
-| `tests/test-one-round.js` | Single round execution test |
-| `tests/test-several-rounds.js` | Multi-round execution test |
-| `tests/test-validate-cid.js` | CID validation test |
-| `tests/testAudits.js` | Audit logic test |
-| `tests/twitter.js` | Twitter adapter integration test |
-| `tests/test_data.js` | Database operation tests |
-| `tests/twitter-adapter.js` | Adapter unit tests |
-
-## Project Structure
-
-```
-KeepCryptoClean/
-├── adapters/
-│   └── twitter/
-│       ├── twitter.js          # Puppeteer-based Twitter automation (1346 lines)
-│       └── README.md           # Twitter adapter setup notes
-├── helpers/
-│   └── db.js                   # Database initialization
-├── images/
-│   └── AddingTask.png          # Documentation image
-├── model/
-│   ├── adapter.js              # Base adapter class
-│   └── data.js                 # NeDB database abstraction
-├── tests/                      # Test suite
-├── wasm/
-│   └── bincode_js.cjs          # WebAssembly module for Koii integration
-├── .env.sample                 # Environment variable template
-├── config-task.yml             # Koii task configuration
-├── coreLogic.js                # Task lifecycle orchestration
-├── couch_comments.json         # Fallback comment library
-├── docker-compose.yaml         # Docker setup (Redis + Koii node)
-├── index.js                    # Entry point & IPC handler
-├── metadata.json               # Koii task metadata
-├── twitter-task.js             # TwitterTask class (crawler + validator)
-├── webpack.config.js           # Webpack configuration
-└── package.json                # Dependencies and scripts
-```
-
-## Key Concepts
-
-### Task Rounds
-
-Each round lasts **33,500 slots** (~3.8 hours at ~408ms per slot). A round is divided into three windows:
-
-- **Submission window** (11,500 slots): Nodes execute their task and submit proof
-- **Audit window** (11,500 slots): Nodes validate other submissions
-- **Distribution**: Rewards are calculated and distributed
-
-### IPFS Submissions
-
-Collected data is packaged as `dataList.json` and uploaded to IPFS. The returned CID serves as proof of work submitted to the Koii blockchain.
-
-### Validation
-
-Auditing nodes fetch another node's IPFS submission, select a random tweet from the data, and verify it against the live Twitter page. Checks include:
-
-- Tweet content hash verification (bcrypt)
-- Comment existence and content matching
-- Username verification
-- Timestamp proximity (within 15 minutes)
-- Duplicate ID detection
-
-### Stake and Rewards
-
-- **Minimum stake**: 1.9 KOII
-- **Bounty per round**: 10 KOII
-- Invalid submissions result in stake penalties
-- Valid submissions earn an equal share of the round bounty
-
-### Comment Rate Limiting
-
-The system enforces a ~22-26 hour cooldown between comments per account using a timestamp stored in the local database. This randomized interval helps avoid detection and account suspension.
-
-## Participation Requirements
-
-1. Volunteer a **spare Twitter account** (not your primary account)
-2. Ensure the account has passed Twitter's verification process
-3. Set up your environment variables with the account credentials
-
-> **Note**: There are no rewards for this task currently, but events and bounties are planned for the future.
-
-## Further Documentation
-
-| Document                               | What it covers                                                  |
-| -------------------------------------- | --------------------------------------------------------------- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Round-by-round lifecycle, data layout, on-chain config.    |
-| [CONTRIBUTING.md](CONTRIBUTING.md)     | Setup, scripts, code style, PR conventions.                     |
-| [SECURITY.md](SECURITY.md)             | Threat model, credential & cookie handling, vulnerability reporting. |
-| [CHANGELOG.md](CHANGELOG.md)           | Notable changes per release.                                    |
-| [tests/README.md](tests/README.md)     | Map of smoke scripts and unit tests.                            |
-| [adapters/twitter/README.md](adapters/twitter/README.md) | Twitter adapter module split + standalone use. |
+- [Architecture](docs/ARCHITECTURE.md)
+- [Operations](docs/OPERATIONS.md)
+- [Release checklist](docs/RELEASE.md)
+- [Dependency advisory register](docs/DEPENDENCY_EXCEPTIONS.md)
+- [Security policy](SECURITY.md)
+- [Privacy policy](PRIVACY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
-[MIT](LICENSE) - Copyright (c) 2024 Madan C. Park and Pranav Mahindru
+[MIT](LICENSE) — Copyright (c) 2024–2026 Madan C. Park, Pranav Mahindru, and
+contributors.

@@ -1,61 +1,74 @@
 # Contributing
 
-Thanks for your interest in KeepCryptoClean. This is a small project with a few moving pieces (a browser automation, a Koii task lifecycle, an IPFS upload, and an audit/voting flow), so a short orientation pays for itself.
-
-Start with the [README](./README.md), then `docs/ARCHITECTURE.md` for a deeper dive into the round lifecycle.
+KeepCryptoClean handles adversarial network data and consensus-visible output.
+Small behavioral changes can affect rewards, slashing, API policy, or operator
+credentials. Keep pull requests narrow and explain the trust-boundary impact.
 
 ## Setup
 
 ```bash
-git clone https://github.com/MadanChaollaPark/KeepCryptoClean.git
-cd KeepCryptoClean
-yarn install
-cp .env.sample .env   # then edit with a *volunteer* Twitter account
+corepack enable
+corepack prepare yarn@1.22.22 --activate
+yarn install --frozen-lockfile
+cp .env.sample .env
+yarn test:ci
 ```
 
-Node 16+ and Yarn are the only system requirements for development. For end-to-end testing on a real Koii node you'll also need the [Koii Desktop Node](https://www.koii.network) installed and the task registered.
+Node 22 LTS is the reference runtime; the package minimum remains Node 18.17 to
+match the supported Koii template contract. Unit tests and CI must not need
+network access or secrets.
 
-## Running locally
+## Required checks
 
-| Command            | What it does                                                            |
-| ------------------ | ----------------------------------------------------------------------- |
-| `yarn start`       | Run the task entrypoint (`index.js`) directly. No Koii runner around it. |
-| `yarn test`        | Single-round end-to-end smoke test. Hits the real X site.                |
-| `yarn test:unit`   | Pure unit tests (no network, no browser).                                |
-| `yarn webpack`     | Build the bundled task in development mode.                              |
-| `yarn webpack:prod`| Build the bundled task in production mode.                               |
-| `yarn lint`        | ESLint over the repo.                                                    |
-| `yarn prod-debug`  | Watch + rebuild + copy bundle into the local Desktop Node runtime.       |
+```bash
+yarn lint
+yarn test:unit
+yarn build
+yarn verify:artifact
+yarn check:repository
+yarn audit:production
+docker compose config --quiet
+```
 
-The smoke tests need the `TWITTER_*` env vars from `.env` — see `tests/README.md`.
+`yarn test:ci` combines the first five checks. Do not weaken, skip, or mark a
+check `continue-on-error` merely to merge a change.
 
-## Code style
+## Design rules
 
-- ESLint is configured (`.eslintrc.cjs` / `eslint.config.cjs`); run `yarn lint` before opening a PR.
-- Prettier defaults: 2-space indent, single quotes, trailing commas — see `.prettierrc`.
-- Prefer the structured logger (`require('./lib/logger')`) over `console.log` so log output stays JSON-parseable.
-- Throw the typed errors from `lib/errors.js` (e.g. `TwitterAuthError`, `BrowserError`) when the call site might want to branch on the failure mode.
-- Keep DOM selectors centralised in `adapters/twitter/utils.js` `SELECTORS` so X UI changes only have to be patched in one place.
+- Preserve the strictly read-only design; an X write path is out of scope.
+- Parse untrusted data into a strict bounded schema before using it.
+- Bind evidence to the expected target, round, node identity, and source ID.
+- Use deterministic inputs for consensus and distribution logic.
+- Return invalid on validation uncertainty; never approve because a dependency
+  or network call failed.
+- Use the structured logger and redact tokens, passwords, cookies, wallet data,
+  request headers, and raw personal data.
+- Add unit tests for success, malformed input, timeouts, replay, duplicates, and
+  dependency failure.
+- Do not add browser automation, X user access tokens, or any X write method.
+- Never add a fallback corpus that can post campaign or harassment text.
 
-## Commits
+## Network tests
 
-- Small, focused commits are easier to review and easier to revert.
-- Imperative mood (`Add foo`, `Fix bar`), capitalised first word.
-- Prefix conventions are loose; recent history uses `Refactor: …`, `Docs: …`, `Add …`, `Fix …`. Pick what fits.
-- Reference issue numbers in the body when relevant.
+Normal tests are offline. X integration tests must use the official read-only
+API in an isolated test task, with a mocked transport in automated CI. No test
+may post, reply, like, repost, follow, or send a DM.
+
+## Koii changes
+
+Changes to `config-task.yml`, lifecycle callbacks, audit rules, distribution
+math, staking, bounty values, or package versions require:
+
+1. an entry in `CHANGELOG.md`;
+2. migration and rollback notes;
+3. a Koii test-task run covering at least the release checklist; and
+4. explicit confirmation of the task ID, environment, funding source, and
+   operator before any remote update.
 
 ## Pull requests
 
-1. Fork and branch off `main`.
-2. Keep the diff scoped — one concern per PR. If you find unrelated cleanup along the way, send it as a separate PR.
-3. Make sure `yarn lint` and `yarn test:unit` pass.
-4. Describe what changed, why, and how you tested it.
-5. Flag anything you couldn't test (e.g. live Twitter login from the audit harness).
+Use the pull-request template. Include the reason, user-visible behavior,
+threat-model change, test evidence, and anything not verified. Security reports
+belong in a private advisory, as described in [SECURITY.md](SECURITY.md).
 
-## Reporting bugs / requesting features
-
-Open an issue on [GitHub](https://github.com/MadanChaollaPark/KeepCryptoClean/issues). For security-sensitive reports, see [SECURITY.md](./SECURITY.md) instead.
-
-## License
-
-By contributing you agree your contributions are licensed under the project's MIT license — see [LICENSE](./LICENSE).
+Contributions are licensed under the repository's [MIT license](LICENSE).

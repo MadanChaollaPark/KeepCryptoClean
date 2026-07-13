@@ -1,42 +1,32 @@
-version: '3.2'
+name: keep-crypto-clean
+
 services:
-  redis:
-    image: redis:alpine
-    container_name: redis
-    command: redis-server --appendonly yes
+  observer:
+    build:
+      context: .
+      target: runtime
+    image: keep-crypto-clean:local
+    init: true
+    restart: unless-stopped
+    read_only: true
+    user: '1000:1000'
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    environment:
+      NODE_ENV: production
+      EXPRESS_PORT: '3000'
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      X_API_BEARER_TOKEN: ${X_API_BEARER_TOKEN:-}
+      X_TARGET_USER_ID: ${X_TARGET_USER_ID:-}
     ports:
-      - 6379:6379
+      - '127.0.0.1:${TASK_HTTP_PORT:-3000}:3000'
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     volumes:
-      - redis_data:/data/
-    restart: always
-    networks:
-      - task_net
-
-  task_node:
-    image: public.ecr.aws/koii-network/task_node:latest
-    command: yarn initialize-start
-    depends_on: 
-      - redis
-    ports:
-      - '8080:8080'
-    env_file: .env-local
-
-    container_name: task_node
-    restart: always
-    links:
-      - redis:redis
-    networks:
-      - task_net
-    volumes:
-      - ./config/koii:/app/config
-      - ./data:/app/data
-      - ./namespace:/app/namespace
-      - ./dist:/app/executables
-   
-networks:
-  task_net:
-    name: task_net
-    driver: bridge
+      - task_runtime:/app/runtime
 
 volumes:
-  redis_data:
+  task_runtime:

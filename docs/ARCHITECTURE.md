@@ -1,159 +1,131 @@
 # Architecture
 
-This document zooms in on what the [README](../README.md) keeps short. It is meant for someone who has cloned the repo and wants a mental model of how a single round actually executes from event to on-chain reward.
+## Objective
 
-## Bird's-eye view
+KeepCryptoClean turns a bounded official-API observation into an ID-only proof
+that independent Koii nodes can validate deterministically. It is not a general
+X client, content archive, campaign bot, or browser automation service.
 
-```
-                     ┌───────────────────────────────────────┐
-                     │  Koii Network task runner (parent IPC)│
-                     └──────────┬────────────────────────────┘
-                                │ IPC messages: executeTask /
-                                │ submitPayload / auditPayload /
-                                │ generateAndSubmitDistributionList /
-                                │ distributionListAudit
-                                ▼
-                          ┌───────────┐
-                          │ index.js  │      <- entry point
-                          │ (router)  │
-                          └─────┬─────┘
-                                │
-                                ▼
-                       ┌──────────────────┐
-                       │ coreLogic.js     │  <- per-phase orchestrator
-                       └─────┬──────┬─────┘
-                             │      │
-            constructs once  │      │ phases 2/3 reuse the same
-            per round        │      │ TwitterTask instance
-                             ▼      ▼
-                     ┌───────────────────────┐
-                     │ TwitterTask           │  twitter-task.js
-                     │  - search term        │
-                     │  - Twitter adapter    │
-                     │  - per-task NeDBs     │
-                     └─────┬─────────────────┘
-                           │
-                           ▼
-                     ┌───────────────────────┐
-                     │ Twitter adapter       │  adapters/twitter/*
-                     │  session / crawler /  │
-                     │  commenter / verifier │
-                     └─────┬─────────────────┘
-                           │
-                           ▼
-                       (X.com via Puppeteer)
+## Components
+
+```text
+X API client ──> transient validation ──> ID-only proof ──> IPFS
+     ^                   |                    |              |
+     |                   v                    v              v
+allowlisted target   fail-closed gate    local namespace   peer fetch
+                                               |              |
+                                               v              v
+                                         Koii task manager -> audit/vote
+                                                              |
+                                                              v
+                                                    deterministic rewards
 ```
 
-## The four phases of a round
+- `index.js` registers the application callbacks with
+  `@_koii/task-manager` and exposes only health/status routes.
+- `coreLogic.js` owns round execution, evidence submission, peer audit, and
+  distribution logic.
+- `twitter-task.js` (retained name for compatibility) constructs and validates
+  round evidence.
+- `adapters/twitter/` contains only the official read-only X API client/policy.
+- `model/data.js` wraps namespace-scoped persistence.
+- `lib/` contains cryptography, errors, retries, and structured logging.
+- `webpack.config.js` creates one self-contained `dist/main.js` executable.
 
-A round is `33,500` slots ≈ 3.8 h. The Koii runner ticks each node through four phases per round:
+The current Koii template separates developer callbacks from lifecycle plumbing
+through `@_koii/task-manager`. A task callback must not install a second IPC
+listener or independently submit the same phase.
 
-### 1. Execute (`coreLogic.task`)
+## Modes
 
-- A new `TwitterTask` is constructed. Its constructor:
-  - opens four NeDB databases (`db`, `proofs`, `cids`, `comment`),
-  - asks the local middleware (`http://localhost:3000/keywords`) for a comment, with a fallback to `couch_comments.json`,
-  - delegates to `Twitter.session.negotiateSession()` which prefers stored encrypted cookies and only logs in with username/password if needed,
-  - kicks off `Twitter.search(...)` which runs the crawler.
-- The crawler scrolls the target X profile (`crawler.js`), parses each tweet article, computes a bcrypt hash of `tweet_text + round`, opens a fresh page, posts a comment via `commenter.js`, and stores the resulting record in the `cids` database keyed by the tweet ID.
-- A per-account cooldown lives in the `comment` database: `LAST_COMMENT_MADE` is checked before each post; the `~22-26h` randomised window is enforced by `checkCommentTimestamp` in `utils.js`.
+### Observer (default)
 
-### 2. Submit (`coreLogic.submitTask` → `TwitterTask.getRoundCID`)
+The adapter requires `X_API_BEARER_TOKEN` and `X_TARGET_USER_ID`, makes
+read-only official X API requests, validates the response transiently, and
+produces no write action. Only policy-permitted Post IDs and User IDs cross into
+the proof builder. Missing configuration, a target mismatch, malformed data, or
+an API error produces no valid proof.
 
-- Reads everything in `cids` for the current round, writes it to `dataList.json` in the namespace base path, uploads it via `KoiiStorageClient.uploadFile`, and stores `proof:<round> -> cid` in the `proofs` database.
-- `submitTask` waits until the end of the submission window (slot math = `roundBeginSlot + submission_window - currentSlot` × 408 ms) before calling `namespaceWrapper.checkSubmissionAndUpdateRound(submission, round)`.
-- Uploads are retried via `lib/retry.withRetry`, which is exponential backoff with jitter and a `shouldRetry` predicate.
+The target User ID is a consensus input, not a per-node preference. Every node
+must use the same frozen numeric ID. A configuration mismatch invalidates the
+round; the task must never fall back to a username or another account.
 
-### 3. Audit (`coreLogic.auditTask` → `TwitterTask.validate`)
+The adapter exposes no X write method and accepts no user access token,
+password, cookie, or browser session.
 
-- The namespace wrapper hands each peer's submission CID to `validateNode`. Validation:
-  1. Fetches the peer's `dataList.json` from IPFS (via `KoiiStorageClient.getFile`, retried).
-  2. Bails out (`return false`) if empty.
-  3. Counts duplicate tweet IDs and logs when above threshold.
-  4. Picks `min(max(ceil(N * 0.05), 1), 5)` items at random and asks the verifier (`adapters/twitter/verifier.js`) to confirm each one against the live X page. Auditing is sequential with a 30 s sleep between checks.
-  5. The submission passes only if every sampled item passes.
-- Each verification:
-  - Spins up a *fresh* Chromium profile so an audit doesn't interfere with the crawl session.
-  - Logs in (cookies preferred, password fallback) and navigates to the comment URL.
-  - Re-extracts the tweet + comment metadata and checks: tweet content match, bcrypt hash, comment ID, comment text, posting username, and timestamp within `TIMESTAMP_TOLERANCE_MINUTES` (15 min).
+## Round lifecycle
 
-### 4. Distribute (`coreLogic.selectAndGenerateDistributionList` / `auditDistribution`)
+### Execute
 
-- The namespace wrapper picks a *decider* node. If that's us, we run `submitDistributionList`:
-  1. `generateDistributionList(round)` walks `taskAccountDataJSON.submissions[round]` and the audit triggers.
-  2. For each candidate:
-     - No audit → valid candidate.
-     - Audit triggered, no votes → slashed (0).
-     - Vote score `>0` → valid candidate.
-     - Vote score `<0` → slashed (0).
-  3. The bounty (`bounty_amount_per_round`) is floor-divided across the surviving candidates.
-  4. The map is uploaded via `namespaceWrapper.uploadDistributionList` and submitted on-chain via `distributionListSubmissionOnChain`.
-- Other nodes audit the distribution list using `validateDistribution` — they regenerate it locally and `shallowEqual` against what was submitted, voting valid iff it matches (or abstaining on errors to avoid slashing the decider unfairly).
+The task manager passes a numeric round. Execution resolves the configured
+target, fetches bounded public data, validates it in memory, discards content
+fields, and stores only permitted IDs plus Koii task metadata for that round. It
+must await every asynchronous Koii value before serializing it.
 
-## Data layout
+### Submit
 
-### Local NeDB
+The task serializes a versioned envelope with a canonical field order, uploads
+it to IPFS, and returns the CID to the task manager. The envelope is limited to
+Post IDs, User IDs, and non-X task metadata such as schema version, Koii round,
+and submitter identity. It must contain no post text, text-derived hash, source
+timestamp, username, media, DM/protected data, credential, cookie, request
+header, local path, or unbounded source payload.
 
-| DB        | Keys                          | Purpose                                                         |
-| --------- | ----------------------------- | --------------------------------------------------------------- |
-| `db`      | `id` = arbitrary, plus `cookies` singleton | General lookups, encrypted Twitter session cookies. |
-| `proofs`  | `id = proof:<round>`          | Maps each round to the CID we submitted, so we can re-fetch.    |
-| `cids`    | `id = <tweetId>`              | Raw tweet+comment records for the current round; flushed to IPFS as `dataList.json`. |
-| `comment` | `id = LAST_COMMENT_MADE`, plus per-comment id rows | Timestamps that drive the per-account ~24 h cooldown. |
+### Audit
 
-### IPFS payload (`dataList.json`)
+Peer CIDs and files are untrusted. Validation applies limits before parsing and
+then checks, at minimum:
 
-An array of records with the shape produced by `crawler.parseItem`:
+- supported schema and mode;
+- expected Koii round and submitting node;
+- exact configured target User ID and Post/User source identifiers;
+- an allowlist of permitted proof fields (unknown fields are rejected);
+- duplicate/replay rules; and
+- fresh official-source agreement when external validation is required.
 
-```jsonc
-{
-  "user_name": "...",
-  "round": 1234,
-  "screen_name": "...",
-  "user_url": "https://x.com/...",
-  "user_img": "https://pbs.twimg.com/...",
-  "tweets_id": "1700000000000000000",
-  "tweets_content": "...",
-  "time_post": 1700000000,
-  "keyword": "JDVance",
-  "hash": "$2a$10$...",         // bcrypt(tweets_content + round)
-  "commentDetails": {
-    "commentId": "1700000000000000001",
-    "getComments": "<comment text>",
-    "username": "<our volunteer account>",
-    "postTime": 1700000000
-  }
-}
-```
+Timeout, unavailable source, malformed evidence, identity mismatch, and any
+exception are invalid outcomes, never implicit approval.
 
-### On-chain task state
+### Distribution
 
-Configured in `config-task.yml`:
+Distribution uses only the Koii candidate set, configured bounty, round, and
+final audit results. Integer allocation and remainder behavior are deterministic
+so every honest node derives the same map. The task manager owns upload,
+selection, on-chain submission, and distribution audit plumbing.
 
-| Field                       | Value         | Notes                                                    |
-| --------------------------- | ------------- | -------------------------------------------------------- |
-| `round_time`                | 33,500 slots  | ≈ 3.8 hours at ~408 ms / slot                            |
-| `audit_window`              | 11,500 slots  | Window during which audit votes are accepted             |
-| `submission_window`         | 11,500 slots  | Window during which submissions are accepted             |
-| `minimum_stake_amount`      | 1.9 KOII      | Stake required to participate                            |
-| `bounty_amount_per_round`   | 10 KOII       | Reward pool split across valid submitters                |
-| `allowed_failed_distributions` | 5          | Retry budget for the decider                             |
-| `space`                     | 5 MB          | On-chain account allocation                              |
-| `task_type`                 | `KPL`         | Token type on Koii                                       |
+## Trust boundaries
 
-## Why so many sleeps?
+| Boundary | Untrusted input | Required control |
+| --- | --- | --- |
+| X API | JSON, IDs, text, timestamps, rate-limit responses | Transient validation, timeout, size/schema limits, exact target check, discard content fields |
+| IPFS | CID and ID-only proof bytes | CID syntax, byte limit before JSON parse, strict allowed fields, schema/version, identity and round binding |
+| Koii peers | submissions, public keys, votes | Wrapper-provided identity, deterministic validation, fail closed |
+| Environment | tokens, target, feature flags | Exact modes, least privilege, redaction, no serialization |
+| Local state | prior rounds and pending evidence | Namespace isolation, unique keys, bounded retention, atomic updates |
+| HTTP status | unauthenticated local request | Health only, localhost binding, no secrets/task internals |
 
-The browser code is sprinkled with `randomDelay` and `sleep` calls. They are not paranoia — they are anti-detection guard-rails. Twitter aggressively flags anything with super-human typing speed or zero-latency clicks. The `TYPING_SPEED_MIN_MS`/`TYPING_SPEED_MAX_MS` and `THINKING_PAUSE_*` constants in `adapters/twitter/utils.js` are tuned conservatively. Tightening them is the fastest way to get the volunteer account suspended; loosen with care.
+## Build and container boundary
 
-## Where to start when changing things
+The production bundle is a single file because `task_audit_program` points to
+`dist/main.js`. Dynamic imports are folded into that executable. Environment
+files are never bundled. Browser engines and the deleted campaign corpus are
+excluded from dependencies and production builds.
 
-| You want to…                                   | Look at                                         |
-| ---------------------------------------------- | ----------------------------------------------- |
-| Change which profile is targeted               | `twitter-task.js#fetchSearchTerms` (`search:`)  |
-| Add or tweak the comment library               | `couch_comments.json` and the middleware        |
-| Change how submissions are validated           | `twitter-task.js#validate` + `verifier.js`      |
-| Change the slashing or reward math             | `coreLogic.js#generateDistributionList` or `lib/distribution.js` |
-| React to an X UI change (selectors)            | `adapters/twitter/utils.js` `SELECTORS`          |
-| Tune anti-detection timing                     | `adapters/twitter/utils.js` (timing constants)  |
-| Change the IPFS upload retry policy            | `adapters/twitter/twitter.js#getSubmissionCID`   |
-| Adjust round / window timing                   | `config-task.yml` (and re-deploy to Koii)        |
+The runtime image contains the executable and healthcheck only, runs as user
+`node`, writes only to `/app/runtime`, and binds diagnostics to localhost in
+Compose. The Compose service is a smoke/observer harness, not proof of Koii
+testnet correctness.
+
+## Operational invariants
+
+- One configured observation target per task deployment.
+- No production website scripting.
+- No X content fields or derivatives in immutable storage; only redistribution-
+  permitted Post/User IDs and Koii task metadata.
+- Operator approval/disclosure for the exact X API use case is a deployment
+  prerequisite; halt if policy or approval changes.
+- No approval on validation errors.
+- No floating install during CI or release.
+- No remote task update without an explicit task ID, environment, funding, and
+  rollback decision.
+- No promotion from `TEST` to `PRODUCTION` until every release gate passes.

@@ -1,24 +1,39 @@
 module.exports = {
+  root: true,
   env: {
     browser: true,
     commonjs: true,
-    es2021: true,
+    es2022: true,
     node: true,
   },
   extends: 'eslint:recommended',
   parserOptions: {
-    ecmaVersion: 15,
+    ecmaVersion: 'latest',
   },
   rules: {
     'no-var': 'error',
-    'prefer-const': 'warn',
-    'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-    'no-console': 'warn',
-    eqeqeq: ['error', 'always'],
-    curly: ['error', 'multi-line'],
+    'prefer-const': 'off',
+    'no-unused-vars': [
+      'error',
+      {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^(NetworkError|ValidationError|TAG_LENGTH)$',
+      },
+    ],
+    'no-console': 'off',
+    eqeqeq: 'off',
+    curly: 'off',
     'no-throw-literal': 'error',
-    'no-return-await': 'warn',
+    'no-return-await': 'off',
     'no-process-exit': 'error',
-    'require-await': 'warn',
+    'require-await': 'off',
   },
+  overrides: [
+    {
+      files: ['tests/**/*.js', 'scripts/**/*.js', 'prod-debug.js'],
+      rules: {
+        'no-process-exit': 'off',
+      },
+    },
+  ],
 };

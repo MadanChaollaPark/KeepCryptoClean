@@ -1,40 +1,95 @@
-# Security
+# Security policy
 
-## Threat model
+## Supported versions
 
-KeepCryptoClean automates a real Twitter/X account. That means the task node holds long-lived credentials (or at least a session) and can post on the user's behalf. Treat the running task with the same care you would any credential-bearing daemon.
+Only the latest commit on `main` and the most recent tagged major release are
+eligible for security fixes. The 1.x/2.x browser-posting design is unsupported
+and must not be deployed.
 
-## Credential handling
+## Reporting
 
-- **Use a dedicated volunteer account.** Never feed your primary X account into the task. If automation gets the account suspended — and X regularly suspends automated accounts — you should not lose anything you care about.
-- **Credentials live only in `.env`.** They are loaded via `dotenv` at process start; they are not written to logs, the database, or any submission payload. Audit any change that adds a new log line near `process.env.TWITTER_*`.
-- **Cookies are encrypted at rest.** After a successful login, the session cookies are encrypted with AES-256-GCM (`lib/crypto.js`) before being written to the local NeDB store. The key is read from `COOKIE_ENCRYPTION_KEY` (64 hex chars / 32 bytes). If the env var is missing the task generates an ephemeral key — stored cookies become unreadable across restarts and a fresh login is required each boot. For long-running deployments, set a stable key.
+Do not open a public issue for vulnerabilities, exposed credentials, wallet
+material, or personal data. Use a
+[private GitHub Security Advisory](https://github.com/MadanChaollaPark/KeepCryptoClean/security/advisories/new).
+Include the affected commit/version, sanitized reproduction, impact, and a safe
+way to contact you. Do not upload live tokens or profile databases as evidence.
 
-  ```bash
-  # generate a key
-  openssl rand -hex 32
-  ```
+## Security boundaries
 
-- **Don't commit `.env`.** It's in `.gitignore`. If you ever do commit it by accident, rotate the credentials immediately.
+The task processes untrusted network data, peer-supplied CIDs, IPFS files, and
+Koii submissions. It may hold an X bearer token and Koii runtime state. The
+production profile therefore follows these rules:
 
-## Network exposure
+- official X API reads only by default;
+- no browser profile, password, cookie, or user token in the image or bundle;
+- explicit target User ID, round, node, schema, field, and size validation;
+- deterministic distribution calculations;
+- bounded network requests and fail-closed error handling;
+- localhost-only diagnostics;
+- an unprivileged, capability-free, read-only container filesystem;
+- no secrets in logs, evidence payloads, metadata, CI, or task configuration;
+- no post text, text-derived hash, source timestamp, username, DM, protected
+  content, or media in an IPFS proof.
 
-- The task starts an Express endpoint at `GET /taskState` (registered by the namespace wrapper in `index.js`). It returns the current task state and is intended for local diagnostics. **Do not expose this port to the public internet** — bind to localhost or behind authenticated reverse-proxy when running on a VPS.
-- The task talks to a local middleware service at `http://localhost:3000/keywords` for the comment library. If unreachable it falls back to `couch_comments.json` in-tree. The middleware itself is out of scope for this repo.
+The rewarded task has no X write path. Do not add reply, posting, like, repost,
+follow, DM, user-token, password, cookie, or website-scripting capability.
 
-## Reporting a vulnerability
+## Secrets
 
-Please **don't** open public GitHub issues for security-sensitive reports. Email the maintainer at the address listed on the GitHub profile of [@MadanChaollaPark](https://github.com/MadanChaollaPark), or open a private GitHub Security Advisory on this repo if available.
+Use a token with the least privilege and shortest practical lifetime. Keep it
+in the Koii runner's secret/task-variable facility or a local `.env` excluded
+from Git. Never bake it into `dist/main.js` or a container layer.
 
-When reporting, please include:
+Before release:
 
-- A description of the issue and the affected version / commit.
-- Reproduction steps or proof-of-concept.
-- Your assessment of impact (data exposure, account takeover, slashing, etc.).
+```bash
+yarn check:repository
+yarn verify:artifact
+```
 
-You can expect an acknowledgement within a few business days.
+The repository guard rejects tracked environment files, browser profiles,
+cookies, login databases, runtime databases, wallet/key files, private-key
+markers, and common token formats. It is defense in depth, not a replacement
+for GitHub secret scanning and push protection. Enable both in repository
+settings.
 
-## Dependency hygiene
+## Known historical exposure
 
-- Run `yarn audit` periodically; the project pulls in puppeteer + chromium, so the dependency surface is non-trivial.
-- Major version bumps for `@_koii/*` packages should be reviewed against the [Koii Network changelog](https://www.koii.network/docs) — task-runner contracts change occasionally.
+Commit `67af152e39e710f05573bc3f69725b7be4204bb4` added Chromium profile
+artifacts, including files named Cookies, Login Data, History, Web Data, and
+Sessions. A later deletion did not remove those objects from public Git
+history.
+
+Required incident response:
+
+1. Rotate every possibly reused X password, API token, encryption key, wallet,
+   and other credential associated with those profiles.
+2. Revoke X and browser sessions from the relevant account security pages.
+3. Preserve an incident record containing affected commits and rotations, but
+   not the secrets themselves.
+4. Coordinate a repository-wide `git filter-repo` rewrite with every
+   collaborator and fork owner, then force-push all affected refs.
+5. Ask the Git host to purge cached sensitive objects if its documented process
+   requires a support request.
+6. Re-clone rather than continuing from an old clone after the rewrite.
+
+A history rewrite is destructive coordination work and is **not** authorized by
+installing or releasing this code. It needs explicit owner approval, a backup,
+collaborator notice, and a verified rotation log. Until that happens, assume
+the historical material remains retrievable.
+
+## Dependency and release controls
+
+- `yarn.lock` is committed and CI uses `--frozen-lockfile`.
+- Dependabot covers npm, GitHub Actions, and Docker.
+- CI runs offline unit tests, lint, a production bundle check, a high-level
+  production audit, a container build, dependency review, and CodeQL.
+- Release artifacts must be rebuilt from a clean checkout and compared with CI.
+- Do not suppress an advisory without a documented exploitability analysis,
+  owner, expiry date, and compensating control.
+
+Current lower-severity upstream findings are tracked in
+[docs/DEPENDENCY_EXCEPTIONS.md](docs/DEPENDENCY_EXCEPTIONS.md).
+
+See [docs/OPERATIONS.md](docs/OPERATIONS.md) for rotation, backup, monitoring,
+and rollback procedures.

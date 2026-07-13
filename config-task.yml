@@ -1,66 +1,45 @@
-# Name and metadata of your task
-task_name: 'AssholeInChief'
-author: 'AIC'
-description: "Volunteer your spare Twitter account and join our mission to hold politicians accountable and shake up the status quo! We're on a quest to spotlight and confront public figures who fall short of integrity and responsibility. By diving into this initiative, you'll play a crucial role in exposing crucial issues and shaking up the political landscape. Please note that we only make one post per account every 24 hours. The task involves posting one (1) comment per day, which will look like:  '(TWITTER_COMMENTS) + 🛋🛋🛋'. Before participating, please ensure that your volunteer Twitter account has passed the verification process. There are no rewards for this task right now, but we are planning events and bounties."
-repositoryUrl: 'https://github.com/chaollapark/SecretProject/'
-imageUrl: 'https://ipfs-gateway.koii.live/ipfs/bafybeidqyigsevqzkxiuprzxipbakvf54gxe4ft427wxb5v5wbj54epdo4/AssholeInChief.png'
-infoUrl: 'https://www.koii.network/ocean/66cf47e86cbc7cbe924f0474'
+# Keep this configuration on TEST until the release checklist in
+# docs/RELEASE.md has been completed against a real Koii test task.
+task_name: 'KeepCryptoClean Observer'
+author: 'Madan Chaolla Park and contributors'
+description: 'A safe-by-default Koii task that records and audits read-only observations from the official X API. Public proofs contain only Post IDs, User IDs, and Koii task metadata; posting is disabled in this deployment profile.'
+repositoryUrl: 'https://github.com/MadanChaollaPark/KeepCryptoClean'
+imageUrl: 'https://opengraph.githubassets.com/keepcryptoclean/MadanChaollaPark/KeepCryptoClean'
+infoUrl: 'https://github.com/MadanChaollaPark/KeepCryptoClean#readme'
+# Privacy policy: https://github.com/MadanChaollaPark/KeepCryptoClean/blob/main/PRIVACY.md
 
-# network value can be DEVELOPMENT , ARWEAVE or IPFS, Recommended IPFS when deploying to testnet as the cli automatically takes care of uploading the executable with the help of web3.js key
 task_executable_network: 'IPFS'
-
-# Path to your executable webpack if the selected network is IPFS and in case of DEVELOPMENT  name it as main
 task_audit_program: 'dist/main.js'
 
-# Total round time of your task : it must be given in slots and each slot is roughly equal to 408ms
-# for testnet
+# One slot is approximately 408 ms. Windows leave a separate distribution
+# period and must be changed only through a reviewed task migration.
 round_time: 33500
 audit_window: 11500
 submission_window: 11500
 
-# Amounts in KOII
 minimum_stake_amount: 1.9
-
-# total_bounty_amount cannot be grater than bounty_amount_per_round
-# total bounty is not accepted in case of update task
 total_bounty_amount: 10
-
-bounty_amount_per_round: 10
-
-#Number of times allowed to re-submit the distribution  list in case the distribution list is audited
-allowed_failed_distributions: 5
-
-#Space in MBs for the account size, that holds the task data
+bounty_amount_per_round: 0.1
+allowed_failed_distributions: 3
 space: 5
-
-# Note that the value field in RequirementTag is optional, so it is up to you to include it or not based on your use case.
-# To add more global variables and task variables, please refer the type,value,description format shown below
 
 requirementsTags:
   - type: TASK_VARIABLE
-    value: 'TWITTER_USERNAME'
-    description: 'The username of your volunteer Twitter account. Please ensure your volunteer Twitter account has passed the Twitter verification process.'
+    value: 'X_API_BEARER_TOKEN'
+    description: 'A read-only X API bearer token. Do not configure user credentials or browser sessions.'
   - type: TASK_VARIABLE
-    value: 'TWITTER_PASSWORD'
-    description: 'The password of your volunteer Twitter account.'
-  - type: TASK_VARIABLE
-    value: 'TWITTER_PHONE'
-    description: 'If verification is required, will use your phone number to login.'
+    value: 'X_TARGET_USER_ID'
+    description: 'The immutable numeric User ID to observe. It is consensus-critical and must be identical on every node.'
   - type: CPU
-    value: '4-core'
+    value: '2-core'
   - type: RAM
-    value: '5 GB'
+    value: '2 GB'
   - type: STORAGE
-    value: '5 GB'
+    value: '1 GB'
 
-# token type KPL
-task_type: 'KPL'
+task_type: 'KOII'
+environment: 'TEST'
 
-# mint address
-token_type: 'BmdvRw51zhCKfkBmw6jmLawJafimTMtZ2eVwT3fL2WM6'
-
-# OPTIONAL Only provide the taskId if you are updating the task otherwise leave blank
+################################ UPDATE TASK ONLY ################################
 task_id: ''
-
-# Provide the description for changes made in new version of task
-migrationDescription: ''
+migrationDescription: '3.0 safe observer-mode redesign; browser posting removed from the production profile.'

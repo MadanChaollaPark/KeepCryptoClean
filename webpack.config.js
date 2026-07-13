@@ -1,25 +1,68 @@
-module.exports = {
-  module: {
-    rules: [
+const path = require('path');
+const webpack = require('webpack');
+
+module.exports = (_env, argv = {}) => {
+  const production = argv.mode === 'production';
+
+  return {
+    entry: './index.js',
+    target: 'node18',
+    mode: production ? 'production' : 'development',
+    devtool: production ? false : 'inline-source-map',
+    output: {
+      path: path.resolve(__dirname, 'dist'),
+      filename: 'main.js',
+      chunkFilename: 'main.[id].js',
+      clean: true,
+      library: {
+        type: 'commonjs2',
+      },
+    },
+    optimization: {
+      minimize: false,
+      splitChunks: false,
+      runtimeChunk: false,
+    },
+    plugins: [
+      // Koii accepts a single task_audit_program file. This also folds lazy
+      // imports (including multiformats) into the uploadable executable.
+      new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
+      // The former campaign fallback was intentionally deleted. If an older
+      // code path still requests it, fail closed at runtime instead of adding
+      // campaign text back to the executable.
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^\.\/couch_comments\.json$/,
+      }),
+      ...(production
+        ? [
+            // Website scripting is a dev-only migration aid. Production uses
+            // the official X API and must not ship a browser engine.
+            new webpack.IgnorePlugin({
+              resourceRegExp:
+                /^(bcryptjs|cheerio|puppeteer|puppeteer-core|puppeteer-chromium-resolver)$/,
+            }),
+          ]
+        : []),
+    ],
+    resolve: {
+      extensions: ['.js', '.json'],
+      // multiformats v13 is ESM-only. Webpack can translate it into the
+      // CommonJS task bundle when the import export condition is preferred.
+      conditionNames: ['import', 'require', 'node', 'default'],
+    },
+    stats: {
+      errorDetails: true,
+      moduleTrace: false,
+    },
+    ignoreWarnings: [
       {
-        test: /\.html$/,
-        use: 'html-loader',
+        module: /express[\\/]lib[\\/]view\.js$/,
+        message: /request of a dependency is an expression/,
       },
     ],
-  },
-  entry: './index.js',
-  target: 'node',
-  // When uploading to arweave use the production mode
-  // mode:"production",
-  mode: 'development',
-  devtool: 'source-map',
-  optimization: {
-    usedExports: false, // <- no remove unused function
-  },
-  stats: {
-    moduleTrace: false,
-  },
-  node: {
-    __dirname: true,
-  },
+    node: {
+      __dirname: true,
+      __filename: true,
+    },
+  };
 };

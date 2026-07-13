@@ -1,20 +1,8 @@
-const Dotenv = require('dotenv-webpack');
+const createConfig = require('./webpack.config');
 
-module.exports = {
-  entry: './index.js',
-  target: 'node',
-  // When uploading to arweave use the production mode
-  // mode:"production",
+// Never use dotenv-webpack here: embedding a developer's .env in an artifact
+// would turn credentials into public bundle contents.
+module.exports = (env, argv) => createConfig(env, {
+  ...argv,
   mode: 'development',
-  devtool: 'source-map',
-  optimization: {
-    usedExports: false, 
-  },
-  stats: {
-    moduleTrace: false,
-  },
-  node: {
-    __dirname: true,
-  },
-  plugins: [new Dotenv()],
-};
+});
