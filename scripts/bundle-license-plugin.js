@@ -15,6 +15,8 @@ const { readBoundedRegularFile } = require('./read-bounded-regular-file');
 const PLUGIN_NAME = 'KeepCryptoCleanBundleLicensePlugin';
 const NOTICE_ASSET = 'THIRD_PARTY_BUNDLE_NOTICES.txt';
 const MAX_LICENSE_FILE_BYTES = 1024 * 1024;
+const MAX_MANIFEST_BYTES = 1024 * 1024;
+const MAX_README_BYTES = 4 * 1024 * 1024;
 const canonicalSourceRepository =
   'https://github.com/MadanChaollaPark/KeepCryptoClean';
 const locallyModifiedPackages = new Set([
@@ -148,6 +150,13 @@ function normalizeText(value) {
   return value.replace(/\r\n?/g, '\n').trimEnd() + '\n';
 }
 
+function readText(filePath, maxBytes, minBytes = 1) {
+  return readBoundedRegularFile(filePath, {
+    minBytes,
+    maxBytes,
+  }).toString('utf8');
+}
+
 function isInside(parent, candidate) {
   const relative = path.relative(parent, candidate);
   return (
@@ -267,7 +276,10 @@ function readmeLicenseSection(packageRoot, identity) {
     .filter(fileName => /^readme(?:\.[^.]+)?$/i.test(fileName))
     .sort(bytewiseCompare)[0];
   if (!readme) return null;
-  const rawReadme = fs.readFileSync(path.join(packageRoot, readme));
+  const rawReadme = readBoundedRegularFile(path.join(packageRoot, readme), {
+    minBytes: 1,
+    maxBytes: MAX_README_BYTES,
+  });
   const lines = normalizeText(rawReadme.toString('utf8')).split('\n');
   let start = lines.findIndex(line => /^#{1,6}\s+licen[cs]e\s*$/i.test(line));
   if (start < 0) {
@@ -309,7 +321,10 @@ function readmeLicenseSection(packageRoot, identity) {
 
 function loadOverride(projectRoot, override) {
   const absolutePath = path.join(projectRoot, override.path);
-  const raw = fs.readFileSync(absolutePath);
+  const raw = readBoundedRegularFile(absolutePath, {
+    minBytes: 1,
+    maxBytes: MAX_LICENSE_FILE_BYTES,
+  });
   const digest = sha256(raw);
   if (digest !== override.sha256) {
     throw new Error(
@@ -324,7 +339,7 @@ function loadOverride(projectRoot, override) {
 
 function packageRecord(packageRoot, projectRoot) {
   const manifest = JSON.parse(
-    fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'),
+    readText(path.join(packageRoot, 'package.json'), MAX_MANIFEST_BYTES),
   );
   if (!manifest.name || !manifest.version) {
     throw new Error(
@@ -407,7 +422,7 @@ function renderInventory(
     'LICENSES/bundle-identities.txt',
   );
   const expectedIdentities = normalizeText(
-    fs.readFileSync(expectedIdentityPath, 'utf8'),
+    readText(expectedIdentityPath, MAX_LICENSE_FILE_BYTES),
   );
   const actualIdentities = normalizeText(
     sorted.map(record => record.identity).join('\n'),
@@ -432,13 +447,19 @@ function renderInventory(
     : canonicalSourceRepository;
 
   const projectLicense = normalizeText(
-    fs.readFileSync(path.join(projectRoot, 'LICENSE'), 'utf8'),
+    readText(path.join(projectRoot, 'LICENSE'), MAX_LICENSE_FILE_BYTES),
   );
   const lgpl = normalizeText(
-    fs.readFileSync(path.join(projectRoot, 'LICENSES/LGPL-3.0.txt'), 'utf8'),
+    readText(
+      path.join(projectRoot, 'LICENSES/LGPL-3.0.txt'),
+      MAX_LICENSE_FILE_BYTES,
+    ),
   );
   const gpl = normalizeText(
-    fs.readFileSync(path.join(projectRoot, 'LICENSES/GPL-3.0.txt'), 'utf8'),
+    readText(
+      path.join(projectRoot, 'LICENSES/GPL-3.0.txt'),
+      MAX_LICENSE_FILE_BYTES,
+    ),
   );
   const lines = [
     'KeepCryptoClean executable license notices',
