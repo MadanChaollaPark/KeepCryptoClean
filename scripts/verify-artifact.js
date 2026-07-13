@@ -7,27 +7,41 @@ const root = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(root, '.env') });
 const { isCanonicalXId } = require('../lib/identifiers');
 const { verifyBundleIntegrity } = require('./bundle-notice-integrity');
+const { readBoundedRegularFile } = require('./read-bounded-regular-file');
 const dist = path.join(root, 'dist');
 const artifact = path.join(dist, 'main.js');
+const bundleNotice = path.join(dist, 'THIRD_PARTY_BUNDLE_NOTICES.txt');
+const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
+const MAX_BUNDLE_NOTICE_BYTES = 8 * 1024 * 1024;
 const failures = [];
 
-if (!fs.existsSync(artifact)) {
-  failures.push('dist/main.js does not exist; run yarn build first.');
-} else {
-  const stat = fs.statSync(artifact);
-  if (!stat.isFile() || stat.size < 10_000) {
-    failures.push(`dist/main.js is unexpectedly small (${stat.size} bytes).`);
-  }
+let artifactBytes = null;
+try {
+  artifactBytes = readBoundedRegularFile(artifact, {
+    minBytes: 10_000,
+    maxBytes: MAX_ARTIFACT_BYTES,
+  });
+} catch (error) {
+  failures.push(
+    error?.code === 'ENOENT'
+      ? 'dist/main.js does not exist; run yarn build first.'
+      : `Unable to safely read dist/main.js: ${error.message}`,
+  );
+}
 
-  const bytes = fs.readFileSync(artifact);
+if (artifactBytes) {
   for (const variable of ['X_API_BEARER_TOKEN']) {
     const value = process.env[variable];
-    if (value && value.length >= 8 && bytes.includes(Buffer.from(value))) {
+    if (
+      value &&
+      value.length >= 8 &&
+      artifactBytes.includes(Buffer.from(value))
+    ) {
       failures.push(`dist/main.js contains the value of ${variable}.`);
     }
   }
 
-  const text = bytes.toString('utf8');
+  const text = artifactBytes.toString('utf8');
   const targetUserId = process.env.KCC_TARGET_USER_ID;
   if (!isCanonicalXId(targetUserId)) {
     failures.push(
@@ -57,9 +71,17 @@ if (!fs.existsSync(artifact)) {
   }
 }
 
-if (fs.existsSync(dist)) {
+let actualFiles = null;
+try {
+  actualFiles = fs.readdirSync(dist);
+} catch (error) {
+  if (error?.code !== 'ENOENT') {
+    failures.push(`Unable to inspect dist: ${error.message}`);
+  }
+}
+
+if (actualFiles) {
   const expectedFiles = new Set(['main.js', 'THIRD_PARTY_BUNDLE_NOTICES.txt']);
-  const actualFiles = fs.readdirSync(dist);
   const unexpectedFiles = actualFiles.filter(file => !expectedFiles.has(file));
   const missingFiles = [...expectedFiles].filter(
     file => !actualFiles.includes(file),
@@ -69,23 +91,25 @@ if (fs.existsSync(dist)) {
       `Unexpected dist contents; missing [${missingFiles.join(', ')}], extra [${unexpectedFiles.join(', ')}].`,
     );
   }
-  const executableFiles = fs
-    .readdirSync(dist)
-    .filter(file => file.endsWith('.js'));
+  const executableFiles = actualFiles.filter(file => file.endsWith('.js'));
   if (executableFiles.length !== 1 || executableFiles[0] !== 'main.js') {
     failures.push(
       `Expected one executable (main.js), found: ${executableFiles.join(', ') || 'none'}.`,
     );
   }
 
-  const bundleNotice = path.join(dist, 'THIRD_PARTY_BUNDLE_NOTICES.txt');
-  if (fs.existsSync(artifact) && fs.existsSync(bundleNotice)) {
-    failures.push(
-      ...verifyBundleIntegrity(
-        fs.readFileSync(artifact),
-        fs.readFileSync(bundleNotice),
-      ).failures,
-    );
+  if (artifactBytes && actualFiles.includes(path.basename(bundleNotice))) {
+    try {
+      const bundleNoticeBytes = readBoundedRegularFile(bundleNotice, {
+        minBytes: 1,
+        maxBytes: MAX_BUNDLE_NOTICE_BYTES,
+      });
+      failures.push(
+        ...verifyBundleIntegrity(artifactBytes, bundleNoticeBytes).failures,
+      );
+    } catch (error) {
+      failures.push(`Unable to safely read bundle notices: ${error.message}`);
+    }
   }
 }
 
