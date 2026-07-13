@@ -11,6 +11,7 @@ corepack enable
 corepack prepare yarn@1.22.22 --activate
 yarn install --frozen-lockfile
 cp .env.sample .env
+export KCC_TARGET_USER_ID=1234567890
 yarn test:ci
 ```
 
@@ -22,7 +23,7 @@ access or secrets.
 ```bash
 yarn lint
 yarn test:unit
-KCC_TARGET_USER_ID=1234567890 yarn build
+yarn build --public-target-user-id 1234567890
 KCC_TARGET_USER_ID=1234567890 yarn verify:artifact
 yarn check:repository
 yarn audit:production
