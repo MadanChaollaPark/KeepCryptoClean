@@ -9,6 +9,7 @@ const {
   END_MARKER,
   verifyBundleIntegrity,
 } = require('./bundle-notice-integrity');
+const { readBoundedRegularFile } = require('./read-bounded-regular-file');
 
 const root = path.resolve(__dirname, '..');
 const nodeModules = path.join(root, 'node_modules');
@@ -16,6 +17,10 @@ const failures = [];
 const warnings = [];
 const strictRelease = process.argv.includes('--release');
 let embeddedReleaseCommit = '';
+const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
+const MAX_BUNDLE_NOTICE_BYTES = 8 * 1024 * 1024;
+const MAX_LICENSE_INPUT_BYTES = 2 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 1024 * 1024;
 const allowedCopyleft = new Set(['rpc-websockets@7.11.2|LGPL-3.0-only']);
 const bundleNoticeName = 'THIRD_PARTY_BUNDLE_NOTICES.txt';
 const unresolvedKoiiPackages = new Set([
@@ -33,6 +38,13 @@ const requiredLicenseDigests = new Map([
     'fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0',
   ],
 ]);
+
+function readText(filePath, maxBytes = MAX_LICENSE_INPUT_BYTES) {
+  return readBoundedRegularFile(filePath, {
+    minBytes: 1,
+    maxBytes,
+  }).toString('utf8');
+}
 
 function packageDirectories(directory) {
   const results = [];
@@ -53,7 +65,7 @@ function packageDirectories(directory) {
 const copyleftPattern = /(?:^|[^A-Z])(A?GPL|LGPL|MPL|EPL|CDDL)-/i;
 for (const directory of packageDirectories(nodeModules)) {
   const manifest = JSON.parse(
-    fs.readFileSync(path.join(directory, 'package.json'), 'utf8'),
+    readText(path.join(directory, 'package.json'), MAX_MANIFEST_BYTES),
   );
   const license = typeof manifest.license === 'string' ? manifest.license : '';
   if (!copyleftPattern.test(license)) continue;
@@ -63,13 +75,9 @@ for (const directory of packageDirectories(nodeModules)) {
   }
 }
 
-const notice = fs.readFileSync(
-  path.join(root, 'THIRD_PARTY_NOTICES.md'),
-  'utf8',
-);
-const packageNotice = fs.readFileSync(
+const notice = readText(path.join(root, 'THIRD_PARTY_NOTICES.md'));
+const packageNotice = readText(
   path.join(root, 'LICENSES/rpc-websockets-LICENSE.txt'),
-  'utf8',
 );
 for (const marker of ['rpc-websockets 7.11.2', 'LGPL-3.0-only']) {
   if (!notice.includes(marker))
@@ -80,30 +88,58 @@ if (!packageNotice.includes('Elpheria j.d.o.o.')) {
 }
 for (const [relativePath, expectedDigest] of requiredLicenseDigests) {
   const absolutePath = path.join(root, relativePath);
-  if (!fs.existsSync(absolutePath)) {
-    failures.push(`Required license text is missing: ${relativePath}`);
+  let bytes;
+  try {
+    bytes = readBoundedRegularFile(absolutePath, {
+      minBytes: 1,
+      maxBytes: MAX_LICENSE_INPUT_BYTES,
+    });
+  } catch (error) {
+    failures.push(
+      error?.code === 'ENOENT'
+        ? `Required license text is missing: ${relativePath}`
+        : `Unable to safely read required license text ${relativePath}: ${error.message}`,
+    );
     continue;
   }
-  const digest = crypto
-    .createHash('sha256')
-    .update(fs.readFileSync(absolutePath))
-    .digest('hex');
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
   if (digest !== expectedDigest) {
     failures.push(`Required license text changed: ${relativePath}`);
   }
 }
 
 const artifact = path.join(root, 'dist/main.js');
-if (!fs.existsSync(artifact)) {
-  failures.push('dist/main.js is missing; run yarn build first.');
-} else {
-  const artifactBytes = fs.readFileSync(artifact);
+let artifactBytes = null;
+try {
+  artifactBytes = readBoundedRegularFile(artifact, {
+    minBytes: 10_000,
+    maxBytes: MAX_ARTIFACT_BYTES,
+  });
+} catch (error) {
+  failures.push(
+    error?.code === 'ENOENT'
+      ? 'dist/main.js is missing; run yarn build first.'
+      : `Unable to safely read dist/main.js: ${error.message}`,
+  );
+}
+
+if (artifactBytes) {
   const text = artifactBytes.toString('utf8');
   const bundleNoticePath = path.join(root, 'dist', bundleNoticeName);
-  if (!fs.existsSync(bundleNoticePath)) {
-    failures.push(`dist/${bundleNoticeName} is missing.`);
-  } else {
-    const bundleNoticeBytes = fs.readFileSync(bundleNoticePath);
+  let bundleNoticeBytes = null;
+  try {
+    bundleNoticeBytes = readBoundedRegularFile(bundleNoticePath, {
+      minBytes: 1,
+      maxBytes: MAX_BUNDLE_NOTICE_BYTES,
+    });
+  } catch (error) {
+    failures.push(
+      error?.code === 'ENOENT'
+        ? `dist/${bundleNoticeName} is missing.`
+        : `Unable to safely read dist/${bundleNoticeName}: ${error.message}`,
+    );
+  }
+  if (bundleNoticeBytes) {
     const bundleNotice = bundleNoticeBytes.toString('utf8');
     failures.push(
       ...verifyBundleIntegrity(artifactBytes, bundleNoticeBytes).failures,
@@ -152,9 +188,8 @@ if (!fs.existsSync(artifact)) {
         );
       }
 
-      const expectedIdentities = fs.readFileSync(
+      const expectedIdentities = readText(
         path.join(root, 'LICENSES/bundle-identities.txt'),
-        'utf8',
       );
       if (`${identities.join('\n')}\n` !== expectedIdentities) {
         failures.push(
