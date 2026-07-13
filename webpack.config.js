@@ -41,7 +41,9 @@ module.exports = (_env, argv = {}) => {
           'license notices are embedded at the end of this executable and ' +
           'emitted as THIRD_PARTY_BUNDLE_NOTICES.txt.',
       }),
-      new BundleLicensePlugin(),
+      new BundleLicensePlugin({
+        releaseCommit: process.env.KCC_RELEASE_COMMIT || '',
+      }),
       new webpack.DefinePlugin({
         __KCC_BUNDLED__: JSON.stringify(true),
         __KCC_TARGET_USER_ID__: JSON.stringify(consensusTargetUserId),

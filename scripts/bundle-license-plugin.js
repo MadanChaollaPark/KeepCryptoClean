@@ -373,6 +373,7 @@ function renderInventory(
   projectRoot,
   runtimeRecord,
   preNoticeDigest,
+  releaseCommit = '',
 ) {
   const records = new Map();
   const packageErrors = [];
@@ -421,7 +422,6 @@ function renderInventory(
     );
   }
 
-  const releaseCommit = process.env.KCC_RELEASE_COMMIT || '';
   if (releaseCommit && !/^[0-9a-f]{40}$/.test(releaseCommit)) {
     throw new Error(
       'KCC_RELEASE_COMMIT must be a lowercase 40-character Git commit',
@@ -509,6 +509,10 @@ function renderInventory(
 }
 
 class BundleLicensePlugin {
+  constructor({ releaseCommit = '' } = {}) {
+    this.releaseCommit = releaseCommit;
+  }
+
   apply(compiler) {
     compiler.hooks.thisCompilation.tap(PLUGIN_NAME, compilation => {
       compilation.hooks.processAssets.tap(
@@ -548,6 +552,7 @@ class BundleLicensePlugin {
             projectRoot,
             runtimeRecord,
             sha256(preNoticeBytes),
+            this.releaseCommit,
           );
           if (inventory.includes('*/')) {
             throw new Error(
