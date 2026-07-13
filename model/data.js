@@ -1,172 +1,178 @@
-const { namespaceWrapper } = require('@_koii/namespace-wrapper');
 const logger = require('../lib/logger');
 
+const NAMESPACE_FIELD = '_dataNamespace';
+
 /**
- * Data — thin wrapper around the namespace-wrapper-provided NeDB instance.
+ * A namespaced, initialization-safe wrapper around Koii's shared NeDB.
  *
- * The Twitter adapter spins up four independent `Data` instances, each with
- * its own `name` prefix:
- *
- *   - `db`        general-purpose tweet/lookup data + login cookies
- *   - `proofs`    record of CIDs we've submitted, keyed by `proof:<round>`
- *   - `cids`      raw collected tweet objects keyed by tweet ID, used to
- *                 build the dataList.json blob uploaded to IPFS
- *   - `comment`   timestamps used for the rate-limit cooldown (last comment
- *                 made, etc.)
- *
- * @param {string} name - logical database name; used as the dbprefix
- * @param {object} data - initial in-memory state (rarely used)
+ * Every query includes `_dataNamespace`. Previous versions constructed four
+ * logical stores over the same database but queried only by `id`, allowing a
+ * cookie, proof, tweet, or cooldown record from one store to shadow another.
  */
 class Data {
-  constructor(name, data) {
-    this.name = name;
+  constructor(name, data, options = {}) {
+    if (typeof name !== 'string' || !name.trim()) {
+      throw new TypeError('Data requires a non-empty namespace name');
+    }
+    this.name = name.trim();
     this.data = data;
-    this.dbprefix = `${name}:`;
+    this.dbprefix = `${this.name}:`;
     this.fullList = [];
     this.lastUpdate = Date.now();
+    this.db = options.db || null;
+    this._initializePromise = null;
   }
 
-  /**
-   * Lazily attach the underlying NeDB handle and ensure indices on the
-   * fields we query most. Idempotent — safe to call multiple times.
-   */
-  async initializeData() {
-    if (this.db) return;
-    const db = await namespaceWrapper.getDb();
-    this.db = db;
-
-    // Ensure indices for common query patterns
-    this._ensureIndex('id');
-    this._ensureIndex('round');
-    this._ensureIndex('termRound');
+  initializeData() {
+    if (this._initializePromise) return this._initializePromise;
+    this._initializePromise = (async () => {
+      if (!this.db) {
+        const { namespaceWrapper } = require('@_koii/task-manager/namespace-wrapper');
+        this.db = await namespaceWrapper.getDb();
+      }
+      if (!this.db) throw new Error(`Database unavailable for namespace ${this.name}`);
+      await Promise.all([
+        this._ensureIndex(NAMESPACE_FIELD),
+        this._ensureIndex('id'),
+        this._ensureIndex('round'),
+        this._ensureIndex('termRound'),
+      ]);
+      return this.db;
+    })().catch(error => {
+      this._initializePromise = null;
+      throw error;
+    });
+    return this._initializePromise;
   }
 
-  _ensureIndex(fieldName) {
-    if (!this.db) return;
-    this.db.ensureIndex({ fieldName, sparse: true }, err => {
-      if (err) logger.error({ fieldName, err }, 'Index creation error');
+  async _ensureIndex(fieldName) {
+    if (!this.db || typeof this.db.ensureIndex !== 'function') return;
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const callback = error => {
+        if (settled) return;
+        settled = true;
+        if (error) reject(error);
+        else resolve();
+      };
+      try {
+        const result = this.db.ensureIndex({ fieldName, sparse: true }, callback);
+        if (result && typeof result.then === 'function') {
+          result.then(() => callback()).catch(callback);
+        }
+      } catch (error) {
+        callback(error);
+      }
     });
   }
 
-  /**
-   * Insert `item`. If a record with the same `id` already exists, the newer
-   * one (by `timestamp`) wins; older inserts are skipped.
-   */
+  _scope(query = {}) {
+    return { ...query, [NAMESPACE_FIELD]: this.name };
+  }
+
+  _record(item) {
+    return { ...item, [NAMESPACE_FIELD]: this.name };
+  }
+
   async create(item) {
-    try {
-      const existingItem = await this.getItem(item);
-
-      if (existingItem) {
-        if (
-          !existingItem[0].timestamp ||
-          (item.timestamp && item.timestamp > existingItem[0].timestamp)
-        ) {
-          await this.db.remove({ id: item.id }, {});
-          this.db.compactDatafile();
-        } else {
-          logger.debug({ id: item.id }, 'Item has older/equal timestamp; skipping');
-          return undefined;
-        }
-      }
-
-      await this.db.insert(item);
-    } catch (e) {
-      logger.error({ err: e, id: item?.id }, 'Error creating item');
+    if (!item || item.id === undefined || item.id === null) {
+      throw new TypeError('Data.create requires an item id');
+    }
+    await this.initializeData();
+    const existing = await this.getItem({ id: item.id });
+    if (
+      existing?.[0]?.timestamp !== undefined &&
+      (!Number.isFinite(item.timestamp) || item.timestamp <= existing[0].timestamp)
+    ) {
+      logger.debug({ id: item.id, namespace: this.name }, 'Item has older/equal timestamp; skipping');
       return undefined;
     }
+    const record = this._record(item);
+    await this.db.update(this._scope({ id: item.id }), record, { upsert: true });
+    return record;
   }
 
-  /** Patch the singleton `cookies` record with the encrypted blob. */
   async updateCookie(item) {
-    try {
-      await this.db.update({ id: 'cookies' }, { $set: item }, {});
-      logger.debug('Cookie record updated');
-    } catch (e) {
-      logger.error({ err: e }, 'Error updating cookie');
-      return undefined;
+    if (!item || item.id !== 'cookies' || typeof item.data !== 'string') {
+      throw new TypeError('updateCookie requires an encrypted cookies record');
     }
+    await this.initializeData();
+    const record = this._record(item);
+    await this.db.update(this._scope({ id: 'cookies' }), record, { upsert: true });
+    return record;
   }
 
-  /** Look up records by `id`. Returns the array of matches or `null`. */
   async getItem(item) {
-    try {
-      const resp = await this.db.find({ id: item.id });
-      return resp.length !== 0 ? resp : null;
-    } catch (e) {
-      logger.error({ err: e, id: item?.id }, 'Error retrieving item');
-      return null;
+    if (!item || item.id === undefined || item.id === null) return null;
+    await this.initializeData();
+    const response = await this.db.find(this._scope({ id: item.id }));
+    return response.length > 0 ? response : null;
+  }
+
+  async getList(options = {}) {
+    await this.initializeData();
+    const round = Number(options.round);
+    if (!Number.isSafeInteger(round) || round < 0) return [];
+    return this.db.find(this._scope({ round }));
+  }
+
+  async deleteList(options = {}) {
+    await this.initializeData();
+    const round = Number(options.round);
+    if (!Number.isSafeInteger(round) || round < 0) {
+      throw new TypeError('deleteList requires a non-negative integer round');
     }
+    return this.db.remove(this._scope({ round }), { multi: true });
   }
 
-  /** Return every record for the given round. */
-  async getList(options) {
-    logger.debug({ round: options.round }, 'Fetching list by round');
-    return this.db.find({ round: options.round });
-  }
-
-  /**
-   * Persist `{ searchTerms, comment }` for `round` so it can be recovered
-   * after a process restart mid-round.
-   */
   async createSearchTerm(searchTerms, round, randomComment) {
-    try {
-      await this.db.insert({
-        termRound: round,
-        terms: searchTerms,
-        comment: randomComment,
-      });
-      logger.info({ round }, 'Search terms stored');
-    } catch (e) {
-      logger.error({ err: e, round }, 'Error storing search terms');
-      return undefined;
+    await this.initializeData();
+    const normalizedRound = Number(round);
+    if (!Number.isSafeInteger(normalizedRound) || normalizedRound < 0) {
+      throw new TypeError('createSearchTerm requires a non-negative integer round');
     }
+    const record = this._record({
+      termRound: normalizedRound,
+      terms: searchTerms,
+      comment: randomComment,
+    });
+    await this.db.update(
+      this._scope({ termRound: normalizedRound }),
+      record,
+      { upsert: true },
+    );
+    return record;
   }
 
-  /** Recover the search term stored for `round`, or null if not present. */
   async getSearchTerm(round) {
-    try {
-      const resp = await this.db.find({ termRound: parseInt(round) });
-      if (resp && resp.length > 0) {
-        return resp[0].terms;
-      }
-      return null;
-    } catch (e) {
-      logger.error({ err: e, round }, 'Error retrieving search term');
-      return null;
-    }
+    await this.initializeData();
+    const normalizedRound = Number(round);
+    if (!Number.isSafeInteger(normalizedRound) || normalizedRound < 0) return null;
+    const response = await this.db.find(this._scope({ termRound: normalizedRound }));
+    return response.length > 0 ? response[0].terms : null;
   }
 
-  /**
-   * Upsert a timestamp record (`id = comment`). The cooldown logic in
-   * `crawler.js` relies on this for the per-account rate-limit (~24h).
-   */
-  async createTimestamp(comment, timestamp) {
-    try {
-      const existingItem = await this.db.find({ id: comment });
-      if (existingItem.length > 0) {
-        if (timestamp > existingItem[0].timestamp) {
-          await this.db.update({ id: comment }, { $set: { timestamp } }, {});
-          logger.debug({ comment }, 'Timestamp updated');
-        }
-      } else {
-        await this.db.insert({ id: comment, timestamp });
-        logger.debug({ comment }, 'Timestamp created');
-      }
-    } catch (e) {
-      logger.error({ err: e, comment }, 'Error managing timestamp');
+  async createTimestamp(key, timestamp) {
+    await this.initializeData();
+    if (typeof key !== 'string' || !key || !Number.isSafeInteger(timestamp) || timestamp <= 0) {
+      throw new TypeError('createTimestamp requires a key and Unix timestamp in seconds');
     }
+    const existing = await this.db.find(this._scope({ id: key }));
+    if (existing.length > 0 && existing[0].timestamp >= timestamp) return existing[0];
+    const record = this._record({ id: key, timestamp });
+    await this.db.update(this._scope({ id: key }), record, { upsert: true });
+    return record;
   }
 
-  /** Read back the timestamp stored for the given key, or null. */
-  async getTimestamp(comment) {
-    try {
-      const resp = await this.db.find({ id: comment });
-      return resp.length > 0 ? resp[0].timestamp : null;
-    } catch (e) {
-      logger.error({ err: e, comment }, 'Error retrieving timestamp');
-      return null;
-    }
+  async getTimestamp(key) {
+    await this.initializeData();
+    if (typeof key !== 'string' || !key) return null;
+    const response = await this.db.find(this._scope({ id: key }));
+    const timestamp = response[0]?.timestamp;
+    return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
   }
 }
+
+Data.NAMESPACE_FIELD = NAMESPACE_FIELD;
 
 module.exports = Data;
