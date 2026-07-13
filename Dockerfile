@@ -24,9 +24,16 @@ RUN KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn lint \
 
 FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS runtime
 
+ARG KCC_RELEASE_COMMIT
 ENV NODE_ENV=production \
     LOG_LEVEL=info
 WORKDIR /app/runtime
+
+LABEL org.opencontainers.image.title="KeepCryptoClean" \
+    org.opencontainers.image.description="Read-only Koii public-interest observation task" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.source="https://github.com/MadanChaollaPark/KeepCryptoClean" \
+    org.opencontainers.image.revision="${KCC_RELEASE_COMMIT}"
 
 RUN mkdir -p /app/dist /app/scripts /app/runtime /app/LICENSES \
     && chown -R node:node /app
