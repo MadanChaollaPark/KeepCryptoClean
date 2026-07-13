@@ -14,11 +14,15 @@ function normalizeRound(round) {
   return Number.isSafeInteger(normalized) && normalized >= 0 ? normalized : null;
 }
 
-function isValidTimestamp(timestamp) {
+function isValidTimestamp(timestamp, nowSeconds, futureSkewSeconds = 0) {
   return (
     Number.isSafeInteger(timestamp) &&
     timestamp > 0 &&
-    timestamp <= Math.floor(Date.now() / 1000) + 5 * 60
+    Number.isSafeInteger(nowSeconds) &&
+    nowSeconds > 0 &&
+    Number.isSafeInteger(futureSkewSeconds) &&
+    futureSkewSeconds >= 0 &&
+    timestamp <= nowSeconds + futureSkewSeconds
   );
 }
 

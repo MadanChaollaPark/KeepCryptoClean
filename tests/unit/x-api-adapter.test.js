@@ -11,7 +11,12 @@ function store() {
   return {
     records,
     initializeData() { return Promise.resolve(this); },
-    create(record) {
+    create(record, options = {}) {
+      if (options.signal?.aborted) {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        return Promise.reject(error);
+      }
       const index = records.findIndex(item => item.id === record.id);
       if (index >= 0) records[index] = record;
       else records.push(record);
@@ -50,17 +55,18 @@ describe('XApiAdapter production contract', () => {
     const dataStore = store();
     dataStore.records.push({
       _id: 'nedb-old',
-      id: '4:999',
+      id: 'round:4',
       round: 4,
-      record: { ...observation(), id: '999', tweetId: '999' },
+      records: [{ ...observation(), id: '999', tweetId: '999' }],
     });
     const proofStore = store();
     const quotaStore = store();
     let uploaded;
     const client = {
-      observeUserId(userId, round) {
+      observeUserId(userId, round, options) {
         assert.equal(userId, '42');
         assert.equal(round, 4);
+        assert.ok(options.signal instanceof AbortSignal);
         return Promise.resolve([observation()]);
       },
       verifyObservationBatch() { return Promise.resolve(true); },
@@ -86,7 +92,7 @@ describe('XApiAdapter production contract', () => {
     });
 
     assert.deepEqual(await adapter.search({ targetUserId: '42', round: 4 }), [observation()]);
-    dataStore.records[0]._id = 'nedb-generated-id';
+    dataStore.records.find(item => item.id === 'round:4')._id = 'nedb-generated-id';
     assert.equal(await adapter.getSubmissionCID(4), 'bafy-test-cid');
     assert.deepEqual(uploaded, [observation()]);
     assert.equal(proofStore.records[0].recordCount, 1);
@@ -114,7 +120,10 @@ describe('XApiAdapter production contract', () => {
     });
     const context = { round: 4, target: { userId: '42' } };
     assert.equal(await adapter.verifyObservationBatch([observation()], context), false);
-    assert.deepEqual(received, { records: [observation()], context });
+    assert.deepEqual(received.records, [observation()]);
+    assert.deepEqual(received.context.target, context.target);
+    assert.equal(received.context.round, 4);
+    assert.ok(received.context.signal instanceof AbortSignal);
   });
 
   it('persists an idempotent rolling 30-day quota and prunes expired reservations', async () => {
@@ -139,5 +148,82 @@ describe('XApiAdapter production contract', () => {
     await adapter._reserveRollingIds(5, 1);
     assert.equal(quotaStore.records[0].count, 1);
     assert.equal(quotaStore.records[0].reservations.length, 1);
+  });
+
+  it('aborts active collection and performs no persistence after stop', async () => {
+    const dataStore = store();
+    let collectionSignal;
+    const adapter = new XApiAdapter({
+      client: {
+        observeUserId(_userId, _round, options) {
+          collectionSignal = options.signal;
+          return new Promise(resolve => {
+            options.signal.addEventListener('abort', () => resolve([observation()]), { once: true });
+          });
+        },
+      },
+      dataStore,
+      proofStore: store(),
+      quotaStore: store(),
+    });
+
+    const search = adapter.search({ targetUserId: '42', round: 4 });
+    while (!collectionSignal) await Promise.resolve();
+    await adapter.stop();
+    await assert.rejects(search, error => error.code === 'ABORTED');
+    assert.equal(collectionSignal.aborted, true);
+    assert.equal(await dataStore.getItem({ id: 'round:4' }), null);
+    await assert.rejects(
+      () => adapter.search({ targetUserId: '42', round: 4 }),
+      error => error.code === 'ABORTED',
+    );
+  });
+
+  it('rejects non-canonical client output before any database write', async () => {
+    const dataStore = store();
+    const adapter = new XApiAdapter({
+      client: {
+        observeUserId() {
+          return Promise.resolve([{ ...observation(), text: 'must never persist' }]);
+        },
+      },
+      dataStore,
+      proofStore: store(),
+      quotaStore: store(),
+      now: () => 1783904400,
+    });
+    await assert.rejects(
+      () => adapter.search({ targetUserId: '42', round: 4 }),
+      /Refusing to persist or upload malformed observation records/,
+    );
+    assert.equal(dataStore.records.length, 0);
+  });
+
+  it('bounds every storage upload attempt with a timeout', async () => {
+    const basePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kcc-upload-timeout-'));
+    const dataStore = store();
+    dataStore.records.push({ id: 'round:4', round: 4, records: [observation()] });
+    const adapter = new XApiAdapter({
+      client: {},
+      dataStore,
+      proofStore: store(),
+      quotaStore: store(),
+      now: () => 1783904400,
+      storageUploadTimeoutMs: 5,
+      storageUploadMaxRetries: 0,
+      namespaceWrapper: {
+        getBasePath: () => Promise.resolve(basePath),
+        getSubmitterAccount: () => Promise.resolve({ publicKey: 'submitter' }),
+      },
+      storageClientFactory: () => ({ uploadFile: () => new Promise(() => {}) }),
+      cidValidator: () => Promise.resolve(true),
+    });
+
+    await assert.rejects(
+      () => adapter.getSubmissionCID(4),
+      /Storage upload attempt timed out after 5ms/,
+    );
+    assert.deepEqual(await fs.promises.readdir(basePath), []);
+    await fs.promises.rm(basePath, { recursive: true, force: true });
   });
 });

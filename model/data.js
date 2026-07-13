@@ -2,6 +2,14 @@ const logger = require('../lib/logger');
 
 const NAMESPACE_FIELD = '_dataNamespace';
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    const error = new Error('Database operation was aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+}
+
 /**
  * A namespaced, initialization-safe wrapper around Koii's shared NeDB.
  *
@@ -74,12 +82,15 @@ class Data {
     return { ...item, [NAMESPACE_FIELD]: this.name };
   }
 
-  async create(item) {
+  async create(item, options = {}) {
     if (!item || item.id === undefined || item.id === null) {
       throw new TypeError('Data.create requires an item id');
     }
+    throwIfAborted(options.signal);
     await this.initializeData();
+    throwIfAborted(options.signal);
     const existing = await this.getItem({ id: item.id });
+    throwIfAborted(options.signal);
     if (
       existing?.[0]?.timestamp !== undefined &&
       (!Number.isFinite(item.timestamp) || item.timestamp <= existing[0].timestamp)
@@ -88,6 +99,7 @@ class Data {
       return undefined;
     }
     const record = this._record(item);
+    throwIfAborted(options.signal);
     await this.db.update(this._scope({ id: item.id }), record, { upsert: true });
     return record;
   }
@@ -174,5 +186,6 @@ class Data {
 }
 
 Data.NAMESPACE_FIELD = NAMESPACE_FIELD;
+Data.throwIfAborted = throwIfAborted;
 
 module.exports = Data;

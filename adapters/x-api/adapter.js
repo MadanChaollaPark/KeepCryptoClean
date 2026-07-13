@@ -3,12 +3,41 @@ const path = require('path');
 const { KoiiStorageClient } = require('@_koii/storage-task-sdk');
 const Data = require('../../model/data');
 const { withRetry } = require('../../lib/retry');
-const { XApiClient, OBSERVATION_RECORD_KEYS } = require('./client');
-const { normalizeId, normalizeRound } = require('./normalization');
+const { XApiClient, XApiRequestError, OBSERVATION_RECORD_KEYS } = require('./client');
+const { normalizeId, normalizeRound, isValidTimestamp } = require('./normalization');
 
 const MAX_OBSERVATIONS_PER_ROUND = 100;
 const DEFAULT_MAX_30_DAY_IDS = 1500000;
 const ROLLING_WINDOW_SECONDS = 30 * 24 * 60 * 60;
+const DEFAULT_STORAGE_UPLOAD_TIMEOUT_MS = 60000;
+
+class StorageUploadTimeoutError extends Error {
+  constructor(timeoutMs) {
+    super(`Storage upload attempt timed out after ${timeoutMs}ms`);
+    this.name = 'StorageUploadTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+async function withTimeout(operation, timeoutMs) {
+  let timeout;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((resolve, reject) => {
+        timeout = setTimeout(() => reject(new StorageUploadTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw new XApiRequestError('X API observation was aborted', { code: 'ABORTED' });
+  }
+}
 
 async function defaultCidValidator(value) {
   try {
@@ -39,6 +68,14 @@ class XApiAdapter {
       Math.max(Number(options.maxObservations) || MAX_OBSERVATIONS_PER_ROUND, 5),
       MAX_OBSERVATIONS_PER_ROUND,
     );
+    this.storageUploadTimeoutMs = Number.isSafeInteger(options.storageUploadTimeoutMs) &&
+      options.storageUploadTimeoutMs > 0
+      ? Math.min(options.storageUploadTimeoutMs, 120000)
+      : DEFAULT_STORAGE_UPLOAD_TIMEOUT_MS;
+    this.storageUploadMaxRetries = Number.isSafeInteger(options.storageUploadMaxRetries) &&
+      options.storageUploadMaxRetries >= 0
+      ? Math.min(options.storageUploadMaxRetries, 3)
+      : 3;
     this.ready = Promise.all([
       this.observations.initializeData(),
       this.proofs.initializeData(),
@@ -46,6 +83,9 @@ class XApiAdapter {
     ]);
     this.lastContext = null;
     this._quotaQueue = Promise.resolve();
+    this._activeControllers = new Set();
+    this._controllerCleanup = new Map();
+    this.stopped = false;
   }
 
   _namespaceWrapper() {
@@ -54,7 +94,9 @@ class XApiAdapter {
   }
 
   async search(query = {}) {
+    if (this.stopped) throw new XApiRequestError('X API adapter is stopped', { code: 'ABORTED' });
     await this.ready;
+    if (this.stopped) throw new XApiRequestError('X API adapter is stopped', { code: 'ABORTED' });
     const round = normalizeRound(query.round);
     const targetUserId = normalizeId(query.targetUserId);
     if (round === null || !targetUserId) {
@@ -64,27 +106,33 @@ class XApiAdapter {
       Math.max(Number(query.limit) || this.maxObservations, 5),
       this.maxObservations,
     );
-    const records = await this.client.observeUserId(targetUserId, round, {
-      maxResults: requestedLimit,
-    });
-    if (records.length > this.maxObservations) {
-      throw new Error('X API observer returned more records than the configured round bound');
-    }
-    await this.observations.deleteList({ round });
-    for (const record of records) {
-      await this.observations.create({
-        id: `${round}:${record.tweetId}`,
-        round,
-        record,
+    const controller = this._createController(query.signal);
+    try {
+      const records = await this.client.observeUserId(targetUserId, round, {
+        maxResults: requestedLimit,
+        signal: controller.signal,
       });
-    }
-    if (records.length > 0) {
-      this.lastContext = {
+      throwIfAborted(controller.signal);
+      if (records.length > this.maxObservations) {
+        throw new Error('X API observer returned more records than the configured round bound');
+      }
+      this._validateCanonicalRecords(records, round, targetUserId);
+      await this.observations.create({
+        id: `round:${round}`,
         round,
-        target: { userId: records[0].targetUserId },
-      };
+        records,
+      }, { signal: controller.signal });
+      throwIfAborted(controller.signal);
+      if (records.length > 0) {
+        this.lastContext = {
+          round,
+          target: { userId: records[0].targetUserId },
+        };
+      }
+      return records;
+    } finally {
+      this._releaseController(controller);
     }
-    return records;
   }
 
   async getSubmissionCID(round) {
@@ -92,32 +140,17 @@ class XApiAdapter {
     const normalizedRound = normalizeRound(round);
     if (normalizedRound === null) throw new TypeError('Submission round must be a non-negative integer');
 
-    const stored = await this.observations.getList({ round: normalizedRound });
-    if (stored.length === 0) return null;
-    if (stored.length > this.maxObservations) {
+    const stored = (await this.observations.getItem({ id: `round:${normalizedRound}` }))?.[0];
+    if (!stored) return null;
+    const records = stored.records;
+    if (!Array.isArray(records) || records.length === 0) return null;
+    if (records.length > this.maxObservations) {
       throw new Error('Refusing to upload an observation set above the configured round bound');
     }
-    const records = stored
-      .map(item => item.record)
-      .sort((left, right) => left.tweetId.localeCompare(right.tweetId));
+    records.sort((left, right) => left.tweetId.localeCompare(right.tweetId));
 
-    const targetUserId = records[0].targetUserId;
-    // A local schema pass before upload catches mixed-target or malformed
-    // persistence even when live API verification is deferred to auditors.
-    for (const record of records) {
-      const exactKeys = Object.keys(record).sort();
-      if (
-        exactKeys.length !== OBSERVATION_RECORD_KEYS.length ||
-        exactKeys.some((key, index) => key !== OBSERVATION_RECORD_KEYS[index]) ||
-        record.schemaVersion !== 1 ||
-        record.provider !== 'x-api-v2' ||
-        record.action !== 'observe' ||
-        record.round !== normalizedRound ||
-        record.targetUserId !== targetUserId
-      ) {
-        throw new Error('Refusing to upload malformed or mixed-context observations');
-      }
-    }
+    const targetUserId = normalizeId(records[0]?.targetUserId);
+    this._validateCanonicalRecords(records, normalizedRound, targetUserId);
     await this._reserveRollingIds(normalizedRound, records.length);
 
     const namespaceWrapper = this._namespaceWrapper();
@@ -135,7 +168,10 @@ class XApiAdapter {
       const cid = await withRetry(async () => {
         const client = this.storageClientFactory();
         const submitter = await namespaceWrapper.getSubmitterAccount();
-        const response = await client.uploadFile(filePath, submitter);
+        const response = await withTimeout(
+          () => client.uploadFile(filePath, submitter),
+          this.storageUploadTimeoutMs,
+        );
         if (!response || typeof response.cid !== 'string' || !response.cid.trim()) {
           throw new Error('Storage upload did not return a CID');
         }
@@ -145,7 +181,7 @@ class XApiAdapter {
         }
         return cid;
       }, {
-        maxRetries: 3,
+        maxRetries: this.storageUploadMaxRetries,
         baseDelayMs: 1000,
         label: 'X API observation upload',
       });
@@ -163,8 +199,64 @@ class XApiAdapter {
     }
   }
 
-  verifyObservationBatch(records, context) {
-    return this.client.verifyObservationBatch(records, context);
+  async verifyObservationBatch(records, context = {}) {
+    if (this.stopped) return false;
+    const controller = this._createController(context.signal);
+    try {
+      return await this.client.verifyObservationBatch(records, {
+        ...context,
+        signal: controller.signal,
+      });
+    } finally {
+      this._releaseController(controller);
+    }
+  }
+
+  _validateCanonicalRecords(records, round, targetUserId) {
+    const validationTime = this.now();
+    if (!Array.isArray(records) || !normalizeId(targetUserId) || !isValidTimestamp(validationTime, validationTime)) {
+      throw new Error('Observation set has an invalid target or validation clock');
+    }
+    const seenIds = new Set();
+    for (const record of records) {
+      const exactKeys = Object.keys(record || {}).sort();
+      const tweetId = normalizeId(record?.tweetId);
+      if (
+        exactKeys.length !== OBSERVATION_RECORD_KEYS.length ||
+        exactKeys.some((key, index) => key !== OBSERVATION_RECORD_KEYS[index]) ||
+        record.schemaVersion !== 1 ||
+        record.provider !== 'x-api-v2' ||
+        record.action !== 'observe' ||
+        normalizeId(record.id) !== tweetId ||
+        seenIds.has(tweetId) ||
+        record.round !== round ||
+        normalizeId(record.targetUserId) !== normalizeId(targetUserId) ||
+        !isValidTimestamp(record.observedAt, validationTime, 5 * 60)
+      ) {
+        throw new Error('Refusing to persist or upload malformed observation records');
+      }
+      seenIds.add(tweetId);
+    }
+  }
+
+  _createController(externalSignal) {
+    const controller = new AbortController();
+    let cleanup = () => {};
+    if (externalSignal?.aborted) controller.abort();
+    else if (externalSignal) {
+      const onAbort = () => controller.abort();
+      externalSignal.addEventListener('abort', onAbort, { once: true });
+      cleanup = () => externalSignal.removeEventListener('abort', onAbort);
+    }
+    this._activeControllers.add(controller);
+    this._controllerCleanup.set(controller, cleanup);
+    return controller;
+  }
+
+  _releaseController(controller) {
+    this._controllerCleanup.get(controller)?.();
+    this._controllerCleanup.delete(controller);
+    this._activeControllers.delete(controller);
   }
 
   _reserveRollingIds(round, recordCount) {
@@ -221,6 +313,11 @@ class XApiAdapter {
   }
 
   async stop() {
+    this.stopped = true;
+    for (const controller of [...this._activeControllers]) {
+      controller.abort();
+      this._releaseController(controller);
+    }
     await this.ready;
     return true;
   }
@@ -231,4 +328,7 @@ module.exports.XApiAdapter = XApiAdapter;
 module.exports.MAX_OBSERVATIONS_PER_ROUND = MAX_OBSERVATIONS_PER_ROUND;
 module.exports.DEFAULT_MAX_30_DAY_IDS = DEFAULT_MAX_30_DAY_IDS;
 module.exports.ROLLING_WINDOW_SECONDS = ROLLING_WINDOW_SECONDS;
+module.exports.DEFAULT_STORAGE_UPLOAD_TIMEOUT_MS = DEFAULT_STORAGE_UPLOAD_TIMEOUT_MS;
 module.exports.defaultCidValidator = defaultCidValidator;
+module.exports.StorageUploadTimeoutError = StorageUploadTimeoutError;
+module.exports.withTimeout = withTimeout;

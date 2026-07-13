@@ -60,4 +60,16 @@ describe('Data namespace isolation', () => {
     await data.createTimestamp('LAST', 99);
     assert.equal(await data.getTimestamp('LAST'), 100);
   });
+
+  it('does not begin a database write after cancellation', async () => {
+    const db = memoryDb();
+    const data = new Data('cancelled', [], { db });
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      () => data.create({ id: 'never-written' }, { signal: controller.signal }),
+      error => error.name === 'AbortError',
+    );
+    assert.equal(db.docs.length, 0);
+  });
 });

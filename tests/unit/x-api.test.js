@@ -4,8 +4,12 @@ const assert = require('node:assert/strict');
 const {
   XApiClient,
   XApiPolicyError,
+  XApiRequestError,
+  DEFAULT_MAX_SOURCE_AGE_SECONDS,
+  DEFAULT_MAX_RESPONSE_BYTES,
   OBSERVATION_RECORD_KEYS,
 } = require('../../adapters/x-api/client');
+const { isValidTimestamp } = require('../../adapters/x-api/normalization');
 
 function transportFor(routes) {
   return {
@@ -50,7 +54,8 @@ describe('read-only X API observations', () => {
     assert.equal(typeof client.createOptInReply, 'undefined');
   });
 
-  it('rejects wrong-author and stale hydrated Posts before persistence', async () => {
+  it('skips stale Posts while failing on wrong-author, malformed, and future data', async () => {
+    assert.equal(DEFAULT_MAX_SOURCE_AGE_SECONDS, 6 * 60 * 60);
     const wrongAuthor = new XApiClient({
       bearerToken: 'read-token',
       now: () => 1783904400,
@@ -63,18 +68,39 @@ describe('read-only X API observations', () => {
     });
     await assert.rejects(() => wrongAuthor.observeUserId('42', 4), XApiPolicyError);
 
-    const stale = new XApiClient({
+    const mixed = new XApiClient({
       bearerToken: 'read-token',
       now: () => 1783904400,
-      maxSourceAgeSeconds: 60,
       env: {},
       transport: transportFor({
         '/users/42/tweets': {
-          data: [{ id: '123', author_id: '42', created_at: '2026-07-13T00:00:00.000Z' }],
+          data: [
+            { id: '111', author_id: '42', created_at: '2026-07-12T18:00:00.000Z' },
+            { id: '123', author_id: '42', created_at: '2026-07-13T00:00:00.000Z' },
+          ],
         },
       }),
     });
-    await assert.rejects(() => stale.observeUserId('42', 4), XApiPolicyError);
+    assert.deepEqual(await mixed.observeUserId('42', 4), [record()]);
+
+    for (const createdAt of ['not-a-date', '2026-07-13T02:00:00.000Z']) {
+      const invalid = new XApiClient({
+        bearerToken: 'read-token',
+        now: () => 1783904400,
+        env: {},
+        transport: transportFor({
+          '/users/42/tweets': { data: [{ id: '123', author_id: '42', created_at: createdAt }] },
+        }),
+      });
+      await assert.rejects(() => invalid.observeUserId('42', 4), XApiPolicyError);
+    }
+  });
+
+  it('validates timestamps exclusively against an injected reference time', () => {
+    assert.equal(isValidTimestamp(100, 100), true);
+    assert.equal(isValidTimestamp(101, 100), false);
+    assert.equal(isValidTimestamp(105, 100, 5), true);
+    assert.equal(isValidTimestamp(106, 100, 5), false);
   });
 
   it('batch fetches in request order and rejects incomplete/injected results', async () => {
@@ -172,5 +198,72 @@ describe('read-only X API observations', () => {
     });
     await assert.rejects(() => badRequestClient.getTweet('123'));
     assert.equal(badRequestCalls, 1);
+  });
+
+  it('sets hard response limits and returns only sanitized terminal errors', async () => {
+    const bearer = 'super-secret-bearer';
+    let requestConfig;
+    const client = new XApiClient({
+      bearerToken: bearer,
+      maxResponseBytes: 2048,
+      env: {},
+      transport: {
+        get(_path, config) {
+          requestConfig = config;
+          return Promise.reject({
+            code: 'ERR_BAD_REQUEST',
+            message: `failed with ${bearer}`,
+            config: { headers: { Authorization: `Bearer ${bearer}` } },
+            response: { status: 401, data: { bearer } },
+          });
+        },
+      },
+    });
+
+    let terminalError;
+    try {
+      await client.getTweet('123');
+    } catch (error) {
+      terminalError = error;
+    }
+    assert.ok(terminalError instanceof XApiRequestError);
+    assert.equal(terminalError.status, 401);
+    assert.equal(terminalError.code, 'ERR_BAD_REQUEST');
+    assert.equal(terminalError.cause, undefined);
+    assert.equal(`${terminalError.message}${JSON.stringify(terminalError)}`.includes(bearer), false);
+    assert.equal(requestConfig.maxContentLength, 2048);
+    assert.equal(requestConfig.maxBodyLength, 2048);
+    assert.equal(DEFAULT_MAX_RESPONSE_BYTES, 1024 * 1024);
+  });
+
+  it('propagates AbortSignal to Axios and does not retry cancellation', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    let receivedSignal;
+    const client = new XApiClient({
+      bearerToken: 'read-token',
+      sleep: () => Promise.resolve(),
+      transport: {
+        get(_path, config) {
+          calls += 1;
+          receivedSignal = config.signal;
+          return new Promise((_resolve, reject) => {
+            config.signal.addEventListener('abort', () => reject({
+              code: 'ERR_CANCELED',
+              name: 'CanceledError',
+              config: { headers: config.headers },
+            }), { once: true });
+          });
+        },
+      },
+    });
+    const request = client.getTweet('123', { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(
+      request,
+      error => error instanceof XApiRequestError && error.code === 'ABORTED',
+    );
+    assert.equal(receivedSignal, controller.signal);
+    assert.equal(calls, 1);
   });
 });
