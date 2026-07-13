@@ -73,12 +73,12 @@ class CoreLogic {
     }
   }
 
-  validateNode = async (submissionValue, round) => {
+  validateNode = async (submissionValue, round, submitterPublicKey) => {
     const task = this.twitterTask;
     if (!task || task.round !== round) return false;
     try {
       if (typeof task.ready === 'function') await task.ready();
-      return (await task.validate(submissionValue, round)) === true;
+      return (await task.validate(submissionValue, round, submitterPublicKey)) === true;
     } catch (error) {
       logger.error({ err: error, round }, 'Node validation failed closed');
       return false;

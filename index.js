@@ -24,7 +24,12 @@ const callbacks = {
   },
   task: serialize('task', round => coreLogic.task(round)),
   submission: serialize('submission', round => coreLogic.fetchSubmission(round)),
-  audit: serialize('audit', (submission, round) => coreLogic.validateNode(submission, round), false),
+  audit: serialize(
+    'audit',
+    (submission, round, submitterPublicKey) =>
+      coreLogic.validateNode(submission, round, submitterPublicKey),
+    false,
+  ),
   distribution: serialize(
     'distribution',
     (submitters, bounty, round) =>
@@ -61,10 +66,8 @@ async function shutdown(signal) {
 
 function handleSignal(signal) {
   shutdown(signal).finally(() => {
-    // Signal-driven shutdown must terminate the task runner after cleanup;
-    // task-manager keeps its HTTP/IPC handles open otherwise.
-    // eslint-disable-next-line no-process-exit
-    process.exit(process.exitCode || 0);
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
   });
 }
 

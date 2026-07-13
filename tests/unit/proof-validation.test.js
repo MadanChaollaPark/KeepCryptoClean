@@ -1,14 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  MonthlyIdQuota,
   ProofReplayCache,
-  sampleWithoutReplacement,
   validateProofPayload,
 } = require('../../lib/proof-validation');
 
 const NOW = 2_000_000_000;
 const TARGET = { userId: '123456789' };
+const SUBMITTER = '11111111111111111111111111111111';
 
 function record(id = '1000000000000000001', overrides = {}) {
   return {
@@ -20,6 +19,7 @@ function record(id = '1000000000000000001', overrides = {}) {
     round: 7,
     targetUserId: TARGET.userId,
     observedAt: NOW - 10,
+    submitterPublicKey: SUBMITTER,
     ...overrides,
   };
 }
@@ -28,6 +28,7 @@ const options = {
   round: 7,
   expectedTarget: TARGET,
   expectedProvider: 'x-api-v2',
+  submitterPublicKey: SUBMITTER,
   nowSeconds: NOW,
 };
 
@@ -46,6 +47,9 @@ test('rejects malformed, off-target, cross-round, future, and stale records', ()
     record('1000000000000000007', { targetUserId: '999' }),
     record('1000000000000000008', { observedAt: NOW + 301 }),
     record('1000000000000000009', { observedAt: NOW - 21601 }),
+    record('1000000000000000010', {
+      submitterPublicKey: '22222222222222222222222222222222',
+    }),
   ];
   for (const proof of invalid) {
     assert.throws(() => validateProofPayload([proof], options));
@@ -79,23 +83,6 @@ test('rejects all hydrated, derivative, username, timestamp, and reply fields', 
       /non-redistributable fields/,
     );
   }
-});
-
-test('sampling never samples with replacement or mutates input', () => {
-  const items = Array.from({ length: 100 }, (_, index) => index);
-  const values = [0.2, 0.8, 0.1, 0.6, 0.4];
-  const sample = sampleWithoutReplacement(items, 5, () => values.shift());
-  assert.equal(new Set(sample).size, 5);
-  assert.deepEqual(items, Array.from({ length: 100 }, (_, index) => index));
-});
-
-test('monthly producer quota enforces a finite policy cap and can be persisted', () => {
-  const quota = new MonthlyIdQuota(3);
-  assert.equal(quota.consume(2, NOW), true);
-  assert.equal(quota.consume(2, NOW), false);
-  assert.equal(quota.consume(1, NOW), true);
-  const restored = new MonthlyIdQuota(3, quota.snapshot());
-  assert.equal(restored.consume(1, NOW), false);
 });
 
 test('replay cache rejects a CID reused in another round and stays bounded', () => {

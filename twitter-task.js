@@ -12,10 +12,46 @@ const { EVIDENCE_PROVIDER, getConsensusTargetUserId } = require('./config/consen
 const {
   DEFAULT_PROOF_LIMITS,
   ProofReplayCache,
+  isValidSubmitterPublicKey,
   validateProofPayload,
 } = require('./lib/proof-validation');
 
 dotenv.config();
+
+const DEFAULT_STORAGE_GET_TIMEOUT_MS = 30_000;
+const DEFAULT_BLOB_TEXT_TIMEOUT_MS = 10_000;
+const DEFAULT_STOP_SETTLEMENT_TIMEOUT_MS = 15_000;
+
+class OperationTimeoutError extends Error {
+  constructor(label, timeoutMs) {
+    super(`${label} timed out after ${timeoutMs}ms`);
+    this.name = 'OperationTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+function normalizeTimeout(value, fallback) {
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+async function withTimeout(operation, timeoutMs, label = 'operation') {
+  const boundedTimeout = normalizeTimeout(timeoutMs, 1);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new OperationTimeoutError(label, boundedTimeout)),
+      boundedTimeout,
+    );
+  });
+  try {
+    const pending = typeof operation === 'function'
+      ? Promise.resolve().then(operation)
+      : Promise.resolve(operation);
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 class TwitterTask {
   constructor(round, options = {}) {
@@ -31,12 +67,13 @@ class TwitterTask {
     this.adapter = null;
     this.initializationError = null;
     this.runError = null;
+    this._stopRequested = false;
 
     this.usesDefaultAdapter = !options.adapterFactory;
     this.adapterFactory = options.adapterFactory || (config => {
       // Lazy so a missing production provider fails readiness rather than
       // silently falling back to the legacy browser/reply implementation.
-      const XApiAdapter = require('./adapters/x-api/adapter');
+      const XApiAdapter = require('./adapters/x-api');
       return new XApiAdapter(config);
     });
     this.getJSONFromCID = options.getJSONFromCID || getJSONFromCID;
@@ -50,6 +87,20 @@ class TwitterTask {
     this.expectedTarget = options.expectedTarget || {
       userId: getConsensusTargetUserId(),
     };
+    this.namespaceWrapper = options.namespaceWrapper || null;
+    this.localSubmitterPublicKey = options.localSubmitterPublicKey || null;
+    this.storageGetTimeoutMs = normalizeTimeout(
+      options.storageGetTimeoutMs,
+      DEFAULT_STORAGE_GET_TIMEOUT_MS,
+    );
+    this.blobTextTimeoutMs = normalizeTimeout(
+      options.blobTextTimeoutMs,
+      DEFAULT_BLOB_TEXT_TIMEOUT_MS,
+    );
+    this.stopSettlementTimeoutMs = normalizeTimeout(
+      options.stopSettlementTimeoutMs,
+      DEFAULT_STOP_SETTLEMENT_TIMEOUT_MS,
+    );
     this._runPromise = null;
     this._readyPromise = this._bootstrap()
       .then(() => true)
@@ -64,7 +115,7 @@ class TwitterTask {
   async _bootstrap() {
     await this.initialize();
     await this.setAdapter();
-    if (this.autoStart) this._launchCrawler();
+    if (this.autoStart && !this._stopRequested) this._launchCrawler();
   }
 
   async ready() {
@@ -86,6 +137,18 @@ class TwitterTask {
         field: 'X_API_BEARER_TOKEN',
       });
     }
+    if (!this.localSubmitterPublicKey) {
+      const wrapper = this.namespaceWrapper ||
+        require('@_koii/task-manager/namespace-wrapper').namespaceWrapper;
+      const account = await wrapper.getSubmitterAccount();
+      this.localSubmitterPublicKey = account?.publicKey?.toBase58?.();
+    }
+    if (!isValidSubmitterPublicKey(this.localSubmitterPublicKey)) {
+      throw new ValidationError('A valid local submitter public key is required', {
+        field: 'submitterPublicKey',
+        value: this.localSubmitterPublicKey,
+      });
+    }
     logger.info({ target: this.expectedTarget, round: this.round }, 'Evidence task configured');
   }
 
@@ -94,6 +157,7 @@ class TwitterTask {
       bearerToken: process.env.X_API_BEARER_TOKEN,
       round: this.round,
       target: this.expectedTarget,
+      submitterPublicKey: this.localSubmitterPublicKey,
     };
     this.adapter = await this.adapterFactory(config);
     if (!this.adapter) throw new Error('Evidence provider factory returned no adapter');
@@ -101,6 +165,7 @@ class TwitterTask {
 
   _launchCrawler() {
     if (this._runPromise) return this._runPromise;
+    if (this._stopRequested) throw new Error('Cannot start a stopped evidence task');
     if (!this.adapter || typeof this.adapter.search !== 'function') {
       throw new Error('Evidence provider does not implement search()');
     }
@@ -111,6 +176,7 @@ class TwitterTask {
       targetUserId: this.expectedTarget.userId,
       target: this.expectedTarget,
       action: 'observe',
+      submitterPublicKey: this.localSubmitterPublicKey,
     };
     this._runPromise = Promise.resolve()
       .then(() => this.adapter.search(query))
@@ -130,11 +196,15 @@ class TwitterTask {
   }
 
   async stop() {
-    await this._readyPromise;
+    this._stopRequested = true;
     this.isRunning = false;
-    if (this.adapter && typeof this.adapter.stop === 'function') {
-      await this.adapter.stop();
-    }
+    await withTimeout(async () => {
+      await this._readyPromise;
+      if (this.adapter && typeof this.adapter.stop === 'function') {
+        await this.adapter.stop();
+      }
+      if (this._runPromise) await this._runPromise;
+    }, this.stopSettlementTimeoutMs, 'Evidence task stop');
   }
 
   async getRoundCID(roundID) {
@@ -154,43 +224,60 @@ class TwitterTask {
   }
 
   async getJSONofCID(cid) {
-    return this.getJSONFromCID(cid, 'dataList.json', 3, { limits: this.limits });
+    return this.getJSONFromCID(cid, 'dataList.json', 3, {
+      limits: this.limits,
+      storageGetTimeoutMs: this.storageGetTimeoutMs,
+      blobTextTimeoutMs: this.blobTextTimeoutMs,
+    });
   }
 
-  async validate(proofCid, round) {
-    if (!Number.isSafeInteger(round) || round < 0 || !(await this.cidValidator(proofCid))) {
+  async validate(proofCid, round, submitterPublicKey) {
+    if (
+      !Number.isSafeInteger(round) ||
+      round < 0 ||
+      !isValidSubmitterPublicKey(submitterPublicKey) ||
+      !(await this.cidValidator(proofCid))
+    ) {
       return false;
     }
 
-    const cached = this.replayCache.get(proofCid, round);
+    const cacheKey = `${submitterPublicKey}:${proofCid}`;
+    const cached = this.replayCache.get(cacheKey, round);
     if (cached.status === 'replay') return false;
     if (cached.status === 'cached') return Boolean(await cached.value);
 
-    const validation = this._validateProof(proofCid, round).catch(error => {
+    const validation = this._validateProof(proofCid, round, submitterPublicKey).catch(error => {
       logger.error({ err: error, proofCid, round }, 'Proof validation failed closed');
       return false;
     });
-    this.replayCache.set(proofCid, round, validation);
+    this.replayCache.set(cacheKey, round, validation);
     return validation;
   }
 
-  async _validateProof(proofCid, round) {
+  async _validateProof(proofCid, round, submitterPublicKey) {
     await this.ready();
     if (round !== this.round) return false;
 
     const data = await this.getJSONFromCID(proofCid, 'dataList.json', 3, {
       limits: this.limits,
+      storageGetTimeoutMs: this.storageGetTimeoutMs,
+      blobTextTimeoutMs: this.blobTextTimeoutMs,
     });
     validateProofPayload(data, {
       round,
       expectedTarget: this.expectedTarget,
       expectedProvider: this.expectedProvider,
+      submitterPublicKey,
       limits: this.limits,
     });
 
     if (this.targetBindingVerifier) {
       for (const record of data) {
-        if (!(await this.targetBindingVerifier(record, { round, target: this.expectedTarget }))) {
+        if (!(await this.targetBindingVerifier(record, {
+          round,
+          target: this.expectedTarget,
+          submitterPublicKey,
+        }))) {
           return false;
         }
       }
@@ -202,7 +289,11 @@ class TwitterTask {
         ? this.adapter.verifyObservationBatch.bind(this.adapter)
         : null);
     if (verifyObservationBatch) {
-      return (await verifyObservationBatch(data, { round, target: this.expectedTarget })) === true;
+      return (await verifyObservationBatch(data, {
+        round,
+        target: this.expectedTarget,
+        submitterPublicKey,
+      })) === true;
     }
     logger.error({ proofCid, round }, 'Provider has no full-proof batch verifier');
     return false;
@@ -218,6 +309,14 @@ async function getJSONFromCID(cid, fileName, retries = 3, options = {}) {
   }
 
   const limits = { ...DEFAULT_PROOF_LIMITS, ...options.limits };
+  const storageGetTimeoutMs = normalizeTimeout(
+    options.storageGetTimeoutMs,
+    DEFAULT_STORAGE_GET_TIMEOUT_MS,
+  );
+  const blobTextTimeoutMs = normalizeTimeout(
+    options.blobTextTimeoutMs,
+    DEFAULT_BLOB_TEXT_TIMEOUT_MS,
+  );
   const storageClientFactory =
     options.storageClientFactory || (() => {
       const { KoiiStorageClient } = require('@_koii/storage-task-sdk');
@@ -226,11 +325,28 @@ async function getJSONFromCID(cid, fileName, retries = 3, options = {}) {
 
   return withRetry(
     async () => {
-      const blob = await storageClientFactory().getFile(cid, fileName);
-      if (Number.isFinite(blob?.size) && blob.size > limits.maxPayloadBytes) {
+      const blob = await withTimeout(
+        () => storageClientFactory().getFile(cid, fileName),
+        storageGetTimeoutMs,
+        'IPFS proof download',
+      );
+      if (!Number.isSafeInteger(blob?.size) || blob.size < 0) {
+        throw new ValidationError('Proof payload size is unavailable', {
+          field: 'payload.size',
+          value: blob?.size,
+        });
+      }
+      if (blob.size > limits.maxPayloadBytes) {
         throw new ValidationError('Proof payload is too large', { field: 'payload.size', value: blob.size });
       }
-      const text = await blob.text();
+      if (typeof blob.text !== 'function') {
+        throw new ValidationError('Proof payload is not readable', { field: 'payload.text' });
+      }
+      const text = await withTimeout(
+        () => blob.text(),
+        blobTextTimeoutMs,
+        'IPFS proof body read',
+      );
       if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > limits.maxPayloadBytes) {
         throw new ValidationError('Proof payload is too large', {
           field: 'payload.size',
@@ -257,3 +373,5 @@ async function getJSONFromCID(cid, fileName, retries = 3, options = {}) {
 
 module.exports = TwitterTask;
 module.exports.getJSONFromCID = getJSONFromCID;
+module.exports.OperationTimeoutError = OperationTimeoutError;
+module.exports.withTimeout = withTimeout;
