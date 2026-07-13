@@ -2283,10 +2283,10 @@ multer@2.0.2, multer@2.2.0:
     concat-stream "^2.0.0"
     type-is "^1.6.18"
 
-multiformats@^13.4.2:
-  version "13.4.2"
-  resolved "https://registry.yarnpkg.com/multiformats/-/multiformats-13.4.2.tgz#309ee17d3946db9a6954cf6832aeb2b4b10dd0f3"
-  integrity sha512-eh6eHCrRi1+POZ3dA+Dq1C6jhP1GNtr9CRINMb67OKzqW9I5DUuZM/3jLPlzhgpGeiNUlEGEbkCYChXMCc/8DQ==
+multiformats@^14.0.4:
+  version "14.0.4"
+  resolved "https://registry.yarnpkg.com/multiformats/-/multiformats-14.0.4.tgz#ac45c4a75db7f757d416aa3e991ff54e2de86324"
+  integrity sha512-+SXItmOUWzT0kjlIfkZ4NawJaC9jW/mPlyn902V9Qgpc7YDwdEiwqbiZxTyvC0XWh1jZguXca3A/WQ+UOPRLUA==
 
 multimatch@5.0.0:
   version "5.0.0"

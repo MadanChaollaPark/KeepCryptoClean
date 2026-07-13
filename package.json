@@ -80,7 +80,7 @@
     "@_koii/web3.js": "^0.1.11",
     "axios": "^1.18.1",
     "dotenv": "^16.6.1",
-    "multiformats": "^13.4.2",
+    "multiformats": "^14.0.4",
     "pino": "^9.14.0"
   },
   "devDependencies": {
