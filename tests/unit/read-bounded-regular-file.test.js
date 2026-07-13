@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -142,3 +143,32 @@ test('bounded reader rejects truncation and an in-place change', t => {
     /file ended while it was being read/,
   );
 });
+
+test(
+  'bounded reader rejects a FIFO without blocking',
+  { skip: process.platform === 'win32' },
+  t => {
+    const root = fixture(t);
+    const fifo = path.join(root, 'fifo');
+    const creation = spawnSync('mkfifo', [fifo], { encoding: 'utf8' });
+    if (creation.error?.code === 'ENOENT') {
+      t.skip('mkfifo is unavailable');
+      return;
+    }
+    assert.equal(creation.status, 0, creation.stderr);
+
+    const helper = require.resolve('../../scripts/read-bounded-regular-file');
+    const script = [
+      'const { readBoundedRegularFile } = require(process.argv[1]);',
+      'readBoundedRegularFile(process.argv[2], { maxBytes: 16 });',
+    ].join('');
+    const result = spawnSync(process.execPath, ['-e', script, helper, fifo], {
+      encoding: 'utf8',
+      timeout: 1_000,
+    });
+
+    assert.notEqual(result.error?.code, 'ETIMEDOUT');
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /expected a regular file/);
+  },
+);

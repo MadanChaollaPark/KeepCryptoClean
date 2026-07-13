@@ -2,13 +2,26 @@
 
 const fs = require('node:fs');
 
-const READ_ONLY_NO_FOLLOW =
-  fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
-
 function unsafeFile(filePath, message) {
   const error = new Error(`${filePath}: ${message}`);
   error.code = 'ERR_UNSAFE_FILE';
   return error;
+}
+
+function safeReadFlags(filePath) {
+  const { O_NOFOLLOW, O_NONBLOCK, O_RDONLY } = fs.constants;
+  if (
+    !Number.isInteger(O_NOFOLLOW) ||
+    O_NOFOLLOW === 0 ||
+    !Number.isInteger(O_NONBLOCK) ||
+    O_NONBLOCK === 0
+  ) {
+    throw unsafeFile(
+      filePath,
+      'platform lacks required no-follow or nonblocking file flags',
+    );
+  }
+  return O_RDONLY | O_NOFOLLOW | O_NONBLOCK;
 }
 
 function validateBound(name, value) {
@@ -39,7 +52,7 @@ function readBoundedRegularFile(
 
   let descriptor;
   try {
-    descriptor = fs.openSync(filePath, READ_ONLY_NO_FOLLOW);
+    descriptor = fs.openSync(filePath, safeReadFlags(filePath));
     const before = fs.fstatSync(descriptor, { bigint: true });
     if (!before.isFile()) {
       throw unsafeFile(filePath, 'expected a regular file');
