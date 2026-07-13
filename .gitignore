@@ -22,7 +22,6 @@ taskStateInfoKeypair.json
 # Koii/runtime state
 data/
 namespace/
-config/
 executables/
 localKOIIDB
 localKOIIDB.db

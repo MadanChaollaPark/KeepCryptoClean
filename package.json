@@ -6,6 +6,8 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
+    "postinstall": "node scripts/patch-task-manager.js",
+    "prebuild": "node scripts/patch-task-manager.js --check",
     "start": "node index.js",
     "build": "webpack --mode production",
     "build:dev": "webpack --mode development",
@@ -68,7 +70,7 @@
   "dependencies": {
     "@_koii/namespace-wrapper": "^1.0.23",
     "@_koii/storage-task-sdk": "^1.2.8",
-    "@_koii/task-manager": "^1.0.14",
+    "@_koii/task-manager": "1.0.14",
     "@_koii/web3.js": "^0.1.11",
     "axios": "^1.18.1",
     "dotenv": "^16.6.1",

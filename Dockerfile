@@ -2,8 +2,8 @@
 
 FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS build
 
-ENV NODE_ENV=development \
-    PUPPETEER_SKIP_DOWNLOAD=true
+ENV NODE_ENV=development
+ARG KCC_TARGET_USER_ID
 WORKDIR /app
 
 RUN corepack enable \
@@ -14,10 +14,10 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
 COPY . .
-RUN yarn lint \
+RUN KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn lint \
     && yarn test:unit \
-    && yarn build \
-    && yarn verify:artifact
+    && KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn build \
+    && KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn verify:artifact
 
 FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS runtime
 

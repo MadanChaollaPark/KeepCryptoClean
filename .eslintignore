@@ -5,11 +5,3 @@ wasm/
 coverage/
 data/
 namespace/
-puppeteer_cache_*/
-adapters/twitter/commenter.js
-adapters/twitter/crawler.js
-adapters/twitter/session.js
-adapters/twitter/verifier.js
-helpers/db.js
-model/adapter.js
-tests/*.js

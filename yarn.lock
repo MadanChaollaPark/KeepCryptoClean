@@ -43,7 +43,7 @@
     bs58 "^5.0.0"
     tweetnacl "^1.0.3"
 
-"@_koii/task-manager@^1.0.14":
+"@_koii/task-manager@1.0.14":
   version "1.0.14"
   resolved "https://registry.yarnpkg.com/@_koii/task-manager/-/task-manager-1.0.14.tgz#33b0ff3b8162e409cb7686cd9b352d57156dcb08"
   integrity sha512-RULxzji53LgIADDa3YSTSRa/nmOf4tTh0hs7pRthSt0rauhMYT0dxqJ5ZXrbNHKWJyZvq+US8teajvS4XP4a/w==

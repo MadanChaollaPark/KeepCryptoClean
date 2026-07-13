@@ -21,5 +21,5 @@ New behavior should cover:
 - unknown proof fields, duplicates, and replay submissions;
 - timeout, rate limit, authentication failure, and dependency outage;
 - deterministic distribution including integer remainder behavior;
-- identical `X_TARGET_USER_ID` across independent nodes; and
+- the same build-embedded `KCC_TARGET_USER_ID` across independent nodes; and
 - proof that no X write method or credential is accepted.

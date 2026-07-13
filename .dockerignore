@@ -11,9 +11,4 @@ data
 namespace
 *.log
 *.db
-puppeteer_cache_*
-**/puppeteer_cache_*
-bodyHTML.html
-passwordHTML.html
-usernameHTML.html
 dataList.json

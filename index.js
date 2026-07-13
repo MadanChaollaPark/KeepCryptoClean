@@ -1,5 +1,5 @@
 const { initializeTaskManager } = require('@_koii/task-manager');
-const { app, namespaceWrapper } = require('@_koii/task-manager/namespace-wrapper');
+const { app } = require('@_koii/task-manager/namespace-wrapper');
 const { coreLogic } = require('./coreLogic');
 const logger = require('./lib/logger');
 
@@ -41,16 +41,6 @@ const callbacks = {
       const ready = Boolean(task && !task.initializationError && !task.runError);
       res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not-ready' });
     });
-    app.get('/taskState', async (_req, res) => {
-      try {
-        const state = await namespaceWrapper.getTaskState({});
-        if (!state) return res.status(503).json({ error: 'Task state unavailable' });
-        return res.status(200).json({ taskState: state });
-      } catch (error) {
-        logger.error({ err: error }, 'Task state route failed');
-        return res.status(503).json({ error: 'Task state unavailable' });
-      }
-    });
   },
 };
 
@@ -70,7 +60,12 @@ async function shutdown(signal) {
 }
 
 function handleSignal(signal) {
-  shutdown(signal).finally(() => process.exit(process.exitCode || 0));
+  shutdown(signal).finally(() => {
+    // Signal-driven shutdown must terminate the task runner after cleanup;
+    // task-manager keeps its HTTP/IPC handles open otherwise.
+    // eslint-disable-next-line no-process-exit
+    process.exit(process.exitCode || 0);
+  });
 }
 
 process.once('SIGINT', () => handleSignal('SIGINT'));

@@ -27,11 +27,18 @@ if (!fs.existsSync(artifact)) {
   }
 
   const text = bytes.toString('utf8');
+  const targetUserId = process.env.KCC_TARGET_USER_ID;
+  if (!/^\d{1,20}$/.test(targetUserId || '')) {
+    failures.push('KCC_TARGET_USER_ID is required to verify the embedded consensus target.');
+  } else if (!text.includes(targetUserId)) {
+    failures.push('dist/main.js does not contain the expected embedded consensus target.');
+  }
   for (const marker of [
     'couch_comments.json',
     'puppeteer-chromium-resolver',
     'X_API_USER_ACCESS_TOKEN',
     'KEEP_CRYPTO_CLEAN_X_API_REPLY_MODE',
+    'process.env.X_TARGET_USER_ID',
   ]) {
     if (text.includes(marker)) {
       failures.push(`dist/main.js contains forbidden legacy/write marker: ${marker}.`);

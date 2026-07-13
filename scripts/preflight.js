@@ -59,8 +59,8 @@ if (!taskConfig.includes("environment: 'TEST'")) {
 if (!taskConfig.includes("task_type: 'KOII'")) {
   warnings.push('Review the configured token type before funding a task.');
 }
-if (!taskConfig.includes("value: 'X_TARGET_USER_ID'")) {
-  failures.push('config-task.yml must require the consensus target User ID.');
+if (taskConfig.includes("value: 'X_TARGET_USER_ID'")) {
+  failures.push('The consensus target must be embedded at build time, not supplied as a node task variable.');
 }
 
 if (!process.env.X_API_BEARER_TOKEN) {
@@ -68,12 +68,34 @@ if (!process.env.X_API_BEARER_TOKEN) {
   if (strict) failures.push(message);
   else warnings.push(message);
 }
-if (!process.env.X_TARGET_USER_ID) {
-  const message = 'X_TARGET_USER_ID is unset; no consensus target is configured.';
+if (process.env.X_TARGET_USER_ID) {
+  failures.push('X_TARGET_USER_ID is unsupported; use build-time KCC_TARGET_USER_ID.');
+}
+if (!process.env.KCC_TARGET_USER_ID) {
+  const message = 'KCC_TARGET_USER_ID is unset; no build-time consensus target is configured.';
   if (strict) failures.push(message);
   else warnings.push(message);
-} else if (!/^\d{1,20}$/.test(process.env.X_TARGET_USER_ID)) {
-  failures.push('X_TARGET_USER_ID must be a numeric X User ID (1-20 digits).');
+} else if (!/^\d{1,20}$/.test(process.env.KCC_TARGET_USER_ID)) {
+  failures.push('KCC_TARGET_USER_ID must be a numeric X User ID (1-20 digits).');
+}
+
+const roundSlots = Number(taskConfig.match(/^round_time:\s*(\d+)\s*$/m)?.[1]);
+const slotSeconds = 0.408;
+const rollingWindowSeconds = 30 * 24 * 60 * 60;
+const maxIdsPerRound = 100;
+const redistributionCap = 1_500_000;
+if (!Number.isSafeInteger(roundSlots) || roundSlots <= 0) {
+  failures.push('config-task.yml round_time must be a positive integer.');
+} else {
+  // Add one boundary round to stay conservative when a 30-day window starts
+  // immediately before a round boundary.
+  const maximumRounds = Math.ceil(rollingWindowSeconds / (roundSlots * slotSeconds)) + 1;
+  const maximumRedistributedIds = maximumRounds * maxIdsPerRound;
+  if (maximumRedistributedIds > redistributionCap) {
+    failures.push(
+      `Configured cadence can redistribute up to ${maximumRedistributedIds} Post IDs per 30 days, above the ${redistributionCap} cap.`,
+    );
+  }
 }
 
 for (const warning of warnings) console.warn(`WARN: ${warning}`);

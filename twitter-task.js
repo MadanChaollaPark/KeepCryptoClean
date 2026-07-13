@@ -8,6 +8,7 @@ const logger = require('./lib/logger');
 const { ValidationError } = require('./lib/errors');
 const { withRetry } = require('./lib/retry');
 const { isValidCID } = require('./lib/cid');
+const { EVIDENCE_PROVIDER, getConsensusTargetUserId } = require('./config/consensus');
 const {
   DEFAULT_PROOF_LIMITS,
   ProofReplayCache,
@@ -42,12 +43,12 @@ class TwitterTask {
     this.cidValidator = options.cidValidator || isValidCID;
     this.batchProofVerifier = options.batchProofVerifier || null;
     this.targetBindingVerifier = options.targetBindingVerifier || null;
-    this.expectedProvider = options.expectedProvider || process.env.EVIDENCE_PROVIDER || 'x-api-v2';
+    this.expectedProvider = EVIDENCE_PROVIDER;
     this.limits = { ...DEFAULT_PROOF_LIMITS, ...options.limits };
     this.replayCache = options.replayCache || new ProofReplayCache(options.maxReplayEntries || 1000);
     this.autoStart = options.autoStart !== false;
     this.expectedTarget = options.expectedTarget || {
-      userId: process.env.X_TARGET_USER_ID,
+      userId: getConsensusTargetUserId(),
     };
     this._runPromise = null;
     this._readyPromise = this._bootstrap()
@@ -75,8 +76,8 @@ class TwitterTask {
   async initialize() {
     const userId = this.expectedTarget?.userId;
     if (!/^\d{1,32}$/.test(userId || '')) {
-      throw new ValidationError('X_TARGET_USER_ID is required', {
-        field: 'X_TARGET_USER_ID',
+      throw new ValidationError('A build-time KCC_TARGET_USER_ID is required', {
+        field: 'KCC_TARGET_USER_ID',
         value: userId,
       });
     }

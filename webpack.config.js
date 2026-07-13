@@ -3,6 +3,13 @@ const webpack = require('webpack');
 
 module.exports = (_env, argv = {}) => {
   const production = argv.mode === 'production';
+  const consensusTargetUserId = process.env.KCC_TARGET_USER_ID || '';
+
+  if (production && !/^\d{1,20}$/.test(consensusTargetUserId)) {
+    throw new Error(
+      'KCC_TARGET_USER_ID must be a numeric X User ID (1-20 digits) when building the production task.',
+    );
+  }
 
   return {
     entry: './index.js',
@@ -24,6 +31,10 @@ module.exports = (_env, argv = {}) => {
       runtimeChunk: false,
     },
     plugins: [
+      new webpack.DefinePlugin({
+        __KCC_BUNDLED__: JSON.stringify(true),
+        __KCC_TARGET_USER_ID__: JSON.stringify(consensusTargetUserId),
+      }),
       // Koii accepts a single task_audit_program file. This also folds lazy
       // imports (including multiformats) into the uploadable executable.
       new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
