@@ -59,8 +59,8 @@ test('Webpack child receives no credential-bearing build environment', () => {
       KCC_RELEASE_COMMIT: 'a'.repeat(40),
       KCC_TARGET_USER_ID: '1234567890',
       PATH: '/usr/bin',
-      RANDOM_PRIVATE_KEY: 'private',
-      X_API_BEARER_TOKEN: 'secret',
+      RANDOM_PRIVATE_KEY: 'test-placeholder-private-key',
+      X_API_BEARER_TOKEN: 'example-not-a-token',
     },
     'production',
   );
@@ -70,8 +70,11 @@ test('Webpack child receives no credential-bearing build environment', () => {
     NODE_ENV: 'production',
     PATH: '/usr/bin',
   });
-  assert.equal(JSON.stringify(child).includes('secret'), false);
-  assert.equal(JSON.stringify(child).includes('private'), false);
+  assert.equal(JSON.stringify(child).includes('example-not-a-token'), false);
+  assert.equal(
+    JSON.stringify(child).includes('test-placeholder-private-key'),
+    false,
+  );
 });
 
 test('Webpack receives validated metadata only through explicit CLI inputs', () => {
