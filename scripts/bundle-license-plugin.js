@@ -10,6 +10,7 @@ const {
   embeddedSuffix,
   sha256,
 } = require('./bundle-notice-integrity');
+const { readBoundedRegularFile } = require('./read-bounded-regular-file');
 
 const PLUGIN_NAME = 'KeepCryptoCleanBundleLicensePlugin';
 const NOTICE_ASSET = 'THIRD_PARTY_BUNDLE_NOTICES.txt';
@@ -249,15 +250,13 @@ function licenseFiles(packageRoot) {
 
   return candidates.map(fileName => {
     const absolutePath = path.join(packageRoot, fileName);
-    const stat = fs.statSync(absolutePath);
-    if (stat.size <= 0 || stat.size > MAX_LICENSE_FILE_BYTES) {
-      throw new Error(
-        `${packageRoot}/${fileName} has an unsafe license-file size`,
-      );
-    }
+    const contents = readBoundedRegularFile(absolutePath, {
+      minBytes: 1,
+      maxBytes: MAX_LICENSE_FILE_BYTES,
+    });
     return {
       fileName,
-      text: normalizeText(fs.readFileSync(absolutePath, 'utf8')),
+      text: normalizeText(contents.toString('utf8')),
     };
   });
 }
