@@ -2,11 +2,13 @@
 
 const crypto = require('node:crypto');
 const { execFileSync, spawnSync } = require('node:child_process');
-const fs = require('node:fs');
 const path = require('node:path');
 const { isCanonicalXId } = require('../lib/identifiers');
+const { readBoundedRegularFile } = require('./read-bounded-regular-file');
 
 const root = path.resolve(__dirname, '..');
+const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
+const MAX_BUNDLE_NOTICE_BYTES = 8 * 1024 * 1024;
 
 function fail(message) {
   console.error(`ERROR: ${message}`);
@@ -31,10 +33,15 @@ function run(command, args, env) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
-function digest(relativePath) {
+function digest(relativePath, maxBytes) {
   return crypto
     .createHash('sha256')
-    .update(fs.readFileSync(path.join(root, relativePath)))
+    .update(
+      readBoundedRegularFile(path.join(root, relativePath), {
+        minBytes: 1,
+        maxBytes,
+      }),
+    )
     .digest('hex');
 }
 
@@ -91,13 +98,19 @@ if (git(['status', '--porcelain', '--untracked-files=all'])) {
 
 run('yarn', ['build'], releaseEnv);
 const first = {
-  artifact: digest('dist/main.js'),
-  notices: digest('dist/THIRD_PARTY_BUNDLE_NOTICES.txt'),
+  artifact: digest('dist/main.js', MAX_ARTIFACT_BYTES),
+  notices: digest(
+    'dist/THIRD_PARTY_BUNDLE_NOTICES.txt',
+    MAX_BUNDLE_NOTICE_BYTES,
+  ),
 };
 run('yarn', ['build'], releaseEnv);
 const second = {
-  artifact: digest('dist/main.js'),
-  notices: digest('dist/THIRD_PARTY_BUNDLE_NOTICES.txt'),
+  artifact: digest('dist/main.js', MAX_ARTIFACT_BYTES),
+  notices: digest(
+    'dist/THIRD_PARTY_BUNDLE_NOTICES.txt',
+    MAX_BUNDLE_NOTICE_BYTES,
+  ),
 };
 if (first.artifact !== second.artifact || first.notices !== second.notices) {
   fail('Two consecutive release builds were not byte-for-byte deterministic.');
