@@ -43,7 +43,8 @@ listener or independently submit the same phase.
 ### Observer (default)
 
 The adapter requires `X_API_BEARER_TOKEN`; the numeric target User ID is
-embedded in the executable from `KCC_TARGET_USER_ID` during the reviewed build.
+embedded in the executable from the explicit public build argument derived from
+the reviewed `KCC_TARGET_USER_ID`.
 It makes read-only official X API requests, validates the response transiently,
 and produces no write action. Only policy-permitted Post IDs and User IDs cross
 into the proof builder. Missing configuration, a target mismatch, malformed

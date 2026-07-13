@@ -5,8 +5,10 @@
 1. Use a clean checkout at the reviewed commit.
 2. Use Node 22 LTS and pinned Yarn 1.22.22.
 3. Create a read-only X API token dedicated to this task.
-4. Freeze one numeric target in `KCC_TARGET_USER_ID` before building. Verify it
-   in the executable; do not provide a node-local target override.
+4. Freeze one numeric target in `KCC_TARGET_USER_ID` before building. The test
+   and release wrappers pass it to the build launcher as the explicit public
+   `--public-target-user-id` argument. Verify it in the executable; do not
+   provide a node-local target override.
 5. Set `KCC_RELEASE_COMMIT` to the lowercase 40-character reviewed commit for a
    release-candidate build. The embedded notice must point to that exact source.
 6. Store the token in the operator secret facility or local `.env`, never in

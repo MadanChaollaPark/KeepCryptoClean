@@ -100,10 +100,12 @@ yarn install --frozen-lockfile
 cp .env.sample .env
 ```
 
-Set `X_API_BEARER_TOKEN` and the build-only `KCC_TARGET_USER_ID` in `.env`, then
-run:
+Set `X_API_BEARER_TOKEN` in `.env`. The build launcher deliberately does not
+read `.env`; export the reviewed public target so source mode and the composite
+test command use the same value and the build receives it explicitly:
 
 ```bash
+export KCC_TARGET_USER_ID=1234567890  # replace with the reviewed target
 yarn preflight:strict
 yarn test:ci
 yarn start
@@ -126,18 +128,18 @@ Docker image, logs, issues, or the task executable.
 
 ## Commands
 
-| Command                        | Purpose                                                                     |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| `yarn test`                    | Run offline unit tests.                                                     |
-| `yarn lint`                    | Lint the tracked JavaScript with zero warnings allowed.                     |
-| `yarn build`                   | Build the single-file `dist/main.js` Koii executable.                       |
-| `yarn test:ci`                 | Preflight, lint, test, build, license/artifact smoke, and hygiene gates.    |
-| `yarn verify:licenses`         | Verify bundled copyleft notices and the exact permitted package/version.    |
-| `yarn verify:licenses:release` | Fail unless release provenance and every authoritative notice are complete. |
-| `yarn audit:production`        | Gate advisories against the reviewed, expiring exception register.          |
-| `yarn audit:all`               | Apply the same gate to the full build toolchain.                            |
-| `yarn preflight`               | Validate versions, metadata, URLs, and safe-mode configuration.             |
-| `yarn preflight:strict`        | Also require read-only API credentials.                                     |
+| Command                                   | Purpose                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `yarn test`                               | Run offline unit tests.                                                     |
+| `yarn lint`                               | Lint the tracked JavaScript with zero warnings allowed.                     |
+| `yarn build --public-target-user-id <id>` | Build `dist/main.js` with an explicit public consensus target.              |
+| `yarn test:ci`                            | Preflight, lint, test, build, license/artifact smoke, and hygiene gates.    |
+| `yarn verify:licenses`                    | Verify bundled copyleft notices and the exact permitted package/version.    |
+| `yarn verify:licenses:release`            | Fail unless release provenance and every authoritative notice are complete. |
+| `yarn audit:production`                   | Gate advisories against the reviewed, expiring exception register.          |
+| `yarn audit:all`                          | Apply the same gate to the full build toolchain.                            |
+| `yarn preflight`                          | Validate versions, metadata, URLs, and safe-mode configuration.             |
+| `yarn preflight:strict`                   | Also require read-only API credentials.                                     |
 
 ## Docker
 
