@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS build
+FROM node:26.7.0-bookworm-slim@sha256:cd565714d4da3e84bfd341e31448f81d47c6362198f152345297c9c1154e6341 AS build
 
 ENV NODE_ENV=development
 ARG KCC_TARGET_USER_ID
@@ -22,7 +22,7 @@ RUN KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn lint \
     && KCC_TARGET_USER_ID="$KCC_TARGET_USER_ID" yarn verify:artifact \
     && yarn verify:licenses
 
-FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS runtime
+FROM node:26.7.0-bookworm-slim@sha256:cd565714d4da3e84bfd341e31448f81d47c6362198f152345297c9c1154e6341 AS runtime
 
 ARG KCC_RELEASE_COMMIT
 ENV NODE_ENV=production \
