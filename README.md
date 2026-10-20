@@ -13,6 +13,39 @@ a Koii `TEST` task until the testnet gates in [docs/RELEASE.md](docs/RELEASE.md)
 are completed. No live task, bounty, or token deployment is implied by this
 source tree.
 
+## Project history and contributors
+
+KeepCryptoClean continues the collaborative project developed in 2024. The
+preserved Git history includes the earlier repository name **SecretProject**
+in [merge commits](https://github.com/MadanChaollaPark/KeepCryptoClean/commit/98f20f52d331c68387d34aa89a82068be2c47dbe)
+and the README title **Asshole in Chief Project** in the
+[August 2024 documentation](https://github.com/MadanChaollaPark/KeepCryptoClean/blob/e6c4dd6746c1b83aa24b3a02ad915e0d177e993e/README.md).
+The [initial README](https://github.com/MadanChaollaPark/KeepCryptoClean/blob/d47610ea32738bc4c767eabb8f84d4f1fcb37019/README.md)
+used the Koii Simple Crawler template name. These are earlier stages of the
+same project, whose original browser-based reply automation has since been
+replaced by the read-only API design described above.
+
+The history records contributions from:
+
+- **[Madan Chaolla Park](https://github.com/MadanChaollaPark):** project
+  adaptation and documentation, followed by
+  [modular refactoring and error handling](https://github.com/MadanChaollaPark/KeepCryptoClean/commit/ca1c44e769eeaa184723646482304841c69e40ac)
+  and the later
+  [read-only X API adapter](https://github.com/MadanChaollaPark/KeepCryptoClean/commit/a712f742d9e2c468b4ade47509f95c3b6ee66a75).
+- **[Pranav Mahindru](https://github.com/pmahindru):** task integration,
+  [submission and audit fixes, refactoring, and round/audit tests](https://github.com/MadanChaollaPark/KeepCryptoClean/commit/1f6ef41144ec3707b1797bd98dab1129cb0c0d63),
+  along with branch and pull-request integration.
+- **[Laura Abro](https://github.com/labrocadabro):**
+  [debugging tooling, build support, and audit-test changes](https://github.com/MadanChaollaPark/KeepCryptoClean/commit/47fd4541da89884151e8d921efc681c5b0c28d8e),
+  integrated through a
+  [preserved pull-request merge](https://github.com/MadanChaollaPark/KeepCryptoClean/commit/db86441c412ecd1b2793c52824fa5fa4df66156f).
+
+See the [full commit history](https://github.com/MadanChaollaPark/KeepCryptoClean/commits/main/)
+for attribution and the [changelog](CHANGELOG.md) for subsequent changes.
+Historical collaboration and the current candidate's release status are
+separate: the current version still requires the validation described in
+[the release checklist](docs/RELEASE.md).
+
 ## Safety model
 
 - With no credentials, collection fails closed.
